@@ -109,4 +109,62 @@ func TestActionsKeyboardAndMouse(t *testing.T) {
 	if m.modalMode != ModalConfirmDelete {
 		t.Fatalf("Expected ModalConfirmDelete after clicking del_chat, got %v", m.modalMode)
 	}
+
+	// 5. Test Mouse Click on "✕ Cancel (Esc/n)" button in ModalConfirmDelete
+	_, modalHitboxes := m.renderButtonBar()
+	var cancelBtn *ButtonHitbox
+	for i := range modalHitboxes {
+		if modalHitboxes[i].ID == "cancel_delete" {
+			cancelBtn = &modalHitboxes[i]
+			break
+		}
+	}
+	if cancelBtn == nil {
+		t.Fatalf("Could not find cancel_delete button in ModalConfirmDelete hitboxes")
+	}
+	updated, _ = m.Update(tea.MouseMsg{
+		X: (cancelBtn.MinX + cancelBtn.MaxX) / 2,
+		Y: m.height - 1,
+		Type: tea.MouseLeft,
+	})
+	m = updated.(Model)
+	if m.modalMode != ModalNone {
+		t.Fatalf("Expected ModalNone after clicking cancel_delete, got %v", m.modalMode)
+	}
+
+	// 6. Test Mouse Click on "✓ Confirm Delete (y)" button removes conversation immediately
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = updated.(Model)
+	_, modalHitboxes = m.renderButtonBar()
+	var confirmBtn *ButtonHitbox
+	for i := range modalHitboxes {
+		if modalHitboxes[i].ID == "confirm_delete" {
+			confirmBtn = &modalHitboxes[i]
+			break
+		}
+	}
+	if confirmBtn == nil {
+		t.Fatalf("Could not find confirm_delete button in hitboxes")
+	}
+	prevCount := len(m.conversations)
+	updated, _ = m.Update(tea.MouseMsg{
+		X: (confirmBtn.MinX + confirmBtn.MaxX) / 2,
+		Y: m.height - 1,
+		Type: tea.MouseLeft,
+	})
+	m = updated.(Model)
+	if len(m.conversations) != prevCount-1 {
+		t.Fatalf("Expected conversation to be removed immediately, got %d (was %d)", len(m.conversations), prevCount)
+	}
+
+	// 7. Test loadStepsCmd on brand-new conversation does NOT hang or produce error
+	cmd := m.loadStepsCmd("completely-unknown-cascade-uuid")
+	msg := cmd()
+	if _, isErr := msg.(errMsg); isErr {
+		t.Fatalf("loadStepsCmd should not produce errMsg on non-existent cascade: %v", msg)
+	}
+	stepsMsg, ok := msg.(stepsLoadedMsg)
+	if !ok || stepsMsg.steps != nil {
+		t.Fatalf("Expected stepsLoadedMsg with nil steps, got %T (%v)", msg, msg)
+	}
 }

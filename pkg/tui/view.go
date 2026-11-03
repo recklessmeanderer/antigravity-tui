@@ -112,15 +112,58 @@ func (m Model) View() string {
 
 func (m Model) renderButtonBar() (string, []ButtonHitbox) {
 	if m.modalMode == ModalNewProject {
+		var hitboxes []ButtonHitbox
+		var renderedBtns []string
+		currentX := 0
+
+		addBtn := func(id, text string, style lipgloss.Style) {
+			rendered := style.Render(text)
+			width := lipgloss.Width(rendered)
+			hitboxes = append(hitboxes, ButtonHitbox{
+				ID:   id,
+				MinX: currentX,
+				MaxX: currentX + width - 1,
+			})
+			renderedBtns = append(renderedBtns, rendered)
+			currentX += width + 1
+		}
+
 		prompt := lipgloss.NewStyle().Bold(true).Foreground(accentColor).Render("📁 NEW PROJECT: ")
+		currentX += lipgloss.Width(prompt)
+
 		inputTxt := lipgloss.NewStyle().Background(surfaceColor).Foreground(textColor).Render(" " + m.modalInput + "█ ")
-		help := lipgloss.NewStyle().Foreground(subduedColor).Render(" [Press Enter to Create, Esc to Cancel]")
-		return prompt + inputTxt + help, nil
+		currentX += lipgloss.Width(inputTxt) + 1
+
+		addBtn("create_proj", "✓ Create (Enter)", btnActiveStyle)
+		addBtn("cancel_proj", "✕ Cancel (Esc)", btnStyle)
+
+		return prompt + inputTxt + " " + strings.Join(renderedBtns, " "), hitboxes
 	}
 
 	if m.modalMode == ModalConfirmDelete {
-		prompt := lipgloss.NewStyle().Bold(true).Foreground(errorColor).Render(m.statusMsg + " [Press 'y' to Confirm, 'n' or Esc to Cancel]")
-		return prompt, nil
+		var hitboxes []ButtonHitbox
+		var renderedBtns []string
+		currentX := 0
+
+		addBtn := func(id, text string, style lipgloss.Style) {
+			rendered := style.Render(text)
+			width := lipgloss.Width(rendered)
+			hitboxes = append(hitboxes, ButtonHitbox{
+				ID:   id,
+				MinX: currentX,
+				MaxX: currentX + width - 1,
+			})
+			renderedBtns = append(renderedBtns, rendered)
+			currentX += width + 1
+		}
+
+		prompt := lipgloss.NewStyle().Bold(true).Foreground(errorColor).Render(m.statusMsg + " ")
+		currentX += lipgloss.Width(prompt)
+
+		addBtn("confirm_delete", "✓ Confirm Delete (y)", btnDangerStyle)
+		addBtn("cancel_delete", "✕ Cancel (Esc/n)", btnStyle)
+
+		return prompt + strings.Join(renderedBtns, " "), hitboxes
 	}
 
 	var hitboxes []ButtonHitbox

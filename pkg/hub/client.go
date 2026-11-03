@@ -423,7 +423,16 @@ func (c *Client) GetTrajectorySteps(ctx context.Context, cascadeID string) ([]St
 		return diskSteps, nil
 	}
 
-	// 2. Fallback to Language Server RPC
+	// 2. If the cascade brain directory does not exist on disk, do not call RPC which hangs indefinitely
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		brainDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID)
+		if _, err := os.Stat(brainDir); os.IsNotExist(err) {
+			return nil, nil
+		}
+	}
+
+	// 3. Fallback to Language Server RPC
 	var resp GetCascadeTrajectoryStepsPayload
 	err := c.UnaryCall(
 		ctx,

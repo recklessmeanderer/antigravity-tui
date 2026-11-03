@@ -164,6 +164,18 @@ func (m Model) loadStepsCmd(cascadeID string) tea.Cmd {
 		if cascadeID == "" {
 			return nil
 		}
+		// If this is a locally created conversation that has 0 steps on disk,
+		// don't call GetTrajectorySteps which hangs waiting for non-existent server cascade!
+		if _, ok := m.createdConversations[cascadeID]; ok {
+			diskSteps, err := hub.LoadTranscriptFromDisk(cascadeID)
+			if err != nil || len(diskSteps) == 0 {
+				return stepsLoadedMsg{
+					cascadeID: cascadeID,
+					steps:     nil,
+				}
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 
@@ -416,7 +428,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stepsLoadedMsg:
 		if msg.cascadeID == m.activeCascadeID {
 			m.steps = msg.steps
-			m.viewport.SetContent(m.renderTranscript())
+			if len(m.steps) == 0 && m.createdConversations != nil && m.createdConversations[msg.cascadeID].CascadeID != "" {
+				conv := m.createdConversations[msg.cascadeID]
+				m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render(
+					fmt.Sprintf("✨ New conversation created in '%s'.\n\nType your message below and press Enter to start working with the agent.", conv.WorkspaceName),
+				))
+			} else {
+				m.viewport.SetContent(m.renderTranscript())
+			}
 			m.viewport.GotoBottom()
 		}
 
@@ -802,6 +821,7 @@ func (m *Model) createNewConversation(projectName string) tea.Cmd {
 			break
 		}
 	}
+	m.rebuildTree()
 
 	m.focusedPane = FocusInput
 	m.input.Reset()
@@ -901,9 +921,44 @@ func (m *Model) executeDeleteCmd() tea.Cmd {
 				delete(m.createdConversations, conv.CascadeID)
 			}
 		}
+		var remaining []hub.ConversationItem
+		for _, conv := range m.conversations {
+			if conv.WorkspaceName != targetName {
+				remaining = append(remaining, conv)
+			}
+		}
+		m.conversations = remaining
+		delete(m.expandedState, targetName)
+		if len(m.conversations) > 0 {
+			m.activeCascadeID = m.conversations[0].CascadeID
+		} else {
+			m.activeCascadeID = ""
+			m.steps = nil
+			m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("No active conversations. Press Ctrl+P to create a project."))
+		}
+		m.rebuildTree()
+		m.statusMsg = fmt.Sprintf("Deleted project '%s'", targetName)
 	} else {
 		m.deletedCascadeIDs[targetID] = true
 		delete(m.createdConversations, targetID)
+		var remaining []hub.ConversationItem
+		for _, conv := range m.conversations {
+			if conv.CascadeID != targetID {
+				remaining = append(remaining, conv)
+			}
+		}
+		m.conversations = remaining
+		if m.activeCascadeID == targetID {
+			if len(m.conversations) > 0 {
+				m.activeCascadeID = m.conversations[0].CascadeID
+			} else {
+				m.activeCascadeID = ""
+				m.steps = nil
+				m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("No active conversations. Press Ctrl+N to create one."))
+			}
+		}
+		m.rebuildTree()
+		m.statusMsg = fmt.Sprintf("Deleted conversation '%s'", targetName)
 	}
 
 	return func() tea.Msg {
@@ -937,6 +992,27 @@ func (m *Model) handleBottomBarClick(x int) tea.Cmd {
 func (m *Model) triggerAction(actionID string) tea.Cmd {
 	var cmds []tea.Cmd
 	switch actionID {
+	case "confirm_delete":
+		m.modalMode = ModalNone
+		return m.executeDeleteCmd()
+	case "cancel_delete":
+		m.modalMode = ModalNone
+		m.statusMsg = "Delete cancelled."
+		return nil
+	case "create_proj":
+		projName := strings.TrimSpace(m.modalInput)
+		m.modalMode = ModalNone
+		m.modalInput = ""
+		if projName != "" {
+			return m.createNewConversation(projName)
+		}
+		m.statusMsg = "Project name cannot be empty."
+		return nil
+	case "cancel_proj":
+		m.modalMode = ModalNone
+		m.modalInput = ""
+		m.statusMsg = "Project creation cancelled."
+		return nil
 	case "tab":
 		m.cyclePaneFocus()
 	case "open":
