@@ -59,10 +59,11 @@ antigravity-tui
 ### In Sidebar (Projects Tree)
 | Keybinding | Action |
 | :--- | :--- |
-| `↑` / `k`, `↓` / `j` | Move selection up / down (auto-scrolls view) |
+| `↑` / `w` / `k`, `↓` / `s` / `j` | Move selection up / down (auto-scrolls view) |
 | `Enter` / `Space` | **On Project**: Toggle Expand / Collapse (`▶` / `▼`)<br>**On Conversation**: Open session & focus input |
-| `→` / `l` | Expand selected project folder |
-| `←` / `h` | Collapse selected project folder / Jump to parent project |
+| `→` / `d` / `l` | Expand selected project folder / Open conversation |
+| `←` / `a` / `h` | Collapse selected project folder / Jump to parent project |
+| **Mouse Click** | Click on any project to toggle expand/collapse, or click a conversation to load it |
 
 ### In Chat Transcript
 | Keybinding | Action |
