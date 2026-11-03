@@ -102,11 +102,11 @@ func (m Model) View() string {
 		tabBtn = btnActiveStyle.Render("⇥ Input")
 	}
 
-	openBtn := btnStyle.Render("↵ Open/Expand")
+	openBtn := btnStyle.Render("␣ Open/Expand")
 	pgUpBtn := btnStyle.Render("▲ PgUp")
 	pgDnBtn := btnStyle.Render("▼ PgDn")
 	refreshBtn := btnStyle.Render("⟳ Refresh")
-	quitBtn := btnQuitStyle.Render("✕ Quit")
+	quitBtn := btnQuitStyle.Render("✕ Quit (Ctrl+C)")
 
 	buttonBar := lipgloss.JoinHorizontal(lipgloss.Center,
 		tabBtn, " ",
@@ -219,7 +219,10 @@ func (m Model) renderSidebar(width int) string {
 
 func (m Model) renderTranscript() string {
 	if len(m.steps) == 0 {
-		return lipgloss.NewStyle().Foreground(subduedColor).Render("No messages in this conversation yet.")
+		if m.activeCascadeID != "" {
+			return lipgloss.NewStyle().Foreground(subduedColor).Render("Loading conversation history...")
+		}
+		return lipgloss.NewStyle().Foreground(subduedColor).Render("Select a conversation from the sidebar to view history.")
 	}
 
 	var b strings.Builder
@@ -283,8 +286,9 @@ func (m Model) renderTranscript() string {
 				b.WriteString("\n")
 				b.WriteString(commandOutputStyle.Render("$ " + step.RunCommand.CommandLine))
 				b.WriteString("\n")
-				if step.RunCommand.Output != "" {
-					outLines := strings.Split(step.RunCommand.Output, "\n")
+				output := step.RunCommand.GetOutput()
+				if output != "" {
+					outLines := strings.Split(output, "\n")
 					if len(outLines) > 12 {
 						outLines = append(outLines[:12], "... [truncated]")
 					}
@@ -293,7 +297,26 @@ func (m Model) renderTranscript() string {
 				}
 				b.WriteString("\n")
 			}
+
+		case "CORTEX_STEP_TYPE_VIEW_FILE":
+			if step.ViewFile != nil && step.ViewFile.AbsolutePathURI != "" {
+				b.WriteString(lipgloss.NewStyle().Foreground(accentColor).Render(fmt.Sprintf("  👁 [View File: %s]\n\n", step.ViewFile.AbsolutePathURI)))
+			}
+
+		case "CORTEX_STEP_TYPE_SEARCH_WEB":
+			if step.SearchWeb != nil && step.SearchWeb.Query != "" {
+				b.WriteString(lipgloss.NewStyle().Foreground(accentColor).Render(fmt.Sprintf("  🌐 [Web Search: %s]\n\n", step.SearchWeb.Query)))
+			}
+
+		case "CORTEX_STEP_TYPE_MCP_TOOL":
+			if step.McpTool != nil {
+				b.WriteString(lipgloss.NewStyle().Foreground(accentColor).Render(fmt.Sprintf("  🔌 [MCP: %s / %s]\n\n", step.McpTool.ServerName, step.McpTool.ToolCall.Name)))
+			}
 		}
+	}
+
+	if b.Len() == 0 {
+		return lipgloss.NewStyle().Foreground(subduedColor).Render("No displayable messages in this conversation yet.")
 	}
 
 	return b.String()

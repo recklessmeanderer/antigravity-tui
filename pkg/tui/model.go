@@ -277,17 +277,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 1. Click on bottom statusline bar buttons
 			if msg.Y >= m.height-1 {
 				// Widths of buttons in bottom statusline:
-				// [Tab: Pane] ~ 0..14
-				// [↵ Open/Expand] ~ 15..32
-				// [▲ PgUp] ~ 33..43
-				// [▼ PgDn] ~ 44..54
-				// [⟳ Refresh] ~ 55..68
-				// [✕ Quit] ~ 69..79
+				// [Tab: Pane] ~ 0..13
+				// [␣ Open/Expand] ~ 14..31
+				// [▲ PgUp] ~ 32..41
+				// [▼ PgDn] ~ 42..51
+				// [⟳ Refresh] ~ 52..65
+				// [✕ Quit (Ctrl+C)] ~ 66..95
 				switch {
-				case msg.X >= 0 && msg.X <= 14:
+				case msg.X >= 0 && msg.X <= 13:
 					m.cyclePaneFocus()
 					return m, nil
-				case msg.X >= 15 && msg.X <= 32:
+				case msg.X >= 14 && msg.X <= 31:
 					// Open or expand current selection
 					if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
 						node := m.visibleNodes[m.selectedNodeIdx]
@@ -296,26 +296,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.rebuildTree()
 						} else if node.Conversation != nil {
 							m.activeCascadeID = node.Conversation.CascadeID
+							m.steps = nil
+							m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("Loading conversation history..."))
 							cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 							m.focusedPane = FocusInput
 							m.input.Focus()
 						}
 					}
 					return m, tea.Batch(cmds...)
-				case msg.X >= 33 && msg.X <= 43:
+				case msg.X >= 32 && msg.X <= 41:
 					m.viewport.HalfViewUp()
 					return m, nil
-				case msg.X >= 44 && msg.X <= 54:
+				case msg.X >= 42 && msg.X <= 51:
 					m.viewport.HalfViewDown()
 					return m, nil
-				case msg.X >= 55 && msg.X <= 68:
+				case msg.X >= 52 && msg.X <= 65:
 					m.statusMsg = "Refreshing conversations..."
 					cmds = append(cmds, m.loadConversationsCmd())
 					if m.activeCascadeID != "" {
 						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
 					}
 					return m, tea.Batch(cmds...)
-				case msg.X >= 69 && msg.X <= 82:
+				case msg.X >= 66 && msg.X <= 95:
 					if m.streamCancelFunc != nil {
 						m.streamCancelFunc()
 					}
@@ -329,9 +331,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.Blur()
 
 				// Click directly on a node row
-				// Row 1 is header, row 2 is "PROJECTS (N)", row 3 is scroll indicator / margin
-				if msg.Y >= 3 {
-					nodeIdx := m.sidebarOffset + (msg.Y - 3)
+				// Row 0: Top title bar
+				// Row 1: Sidebar border top
+				// Row 2: PROJECTS (N) header
+				// Row 3: Top scroll indicator (if offset > 0) or empty line
+				// Row 4: First visible node (offset + 0)
+				if msg.Y == 3 && m.sidebarOffset > 0 {
+					m.sidebarOffset--
+					m.rebuildTree()
+					return m, nil
+				}
+				if msg.Y >= 4 {
+					nodeIdx := m.sidebarOffset + (msg.Y - 4)
 					if nodeIdx >= 0 && nodeIdx < len(m.visibleNodes) {
 						m.selectedNodeIdx = nodeIdx
 						node := m.visibleNodes[nodeIdx]
@@ -340,6 +351,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.rebuildTree()
 						} else if node.Conversation != nil {
 							m.activeCascadeID = node.Conversation.CascadeID
+							m.steps = nil
+							m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("Loading conversation history..."))
 							cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 							m.focusedPane = FocusInput
 							m.input.Focus()
@@ -383,6 +396,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.activeCascadeID == "" && len(m.conversations) > 0 {
 			m.activeCascadeID = m.conversations[0].CascadeID
+			m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("Loading conversation history..."))
 			cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 		}
 
@@ -451,6 +465,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.rebuildTree()
 					} else if node.Conversation != nil {
 						m.activeCascadeID = node.Conversation.CascadeID
+						m.steps = nil
+						m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("Loading conversation history..."))
 						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 						m.focusedPane = FocusInput
 						m.input.Focus()
@@ -466,6 +482,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					} else if node.Conversation != nil {
 						m.activeCascadeID = node.Conversation.CascadeID
+						m.steps = nil
+						m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("Loading conversation history..."))
 						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 						m.focusedPane = FocusInput
 						m.input.Focus()
@@ -577,5 +595,7 @@ func (m *Model) recalculateLayout() {
 	m.input.SetWidth(contentWidth - 4)
 
 	m.rebuildTree()
-	m.viewport.SetContent(m.renderTranscript())
+	if len(m.steps) > 0 {
+		m.viewport.SetContent(m.renderTranscript())
+	}
 }

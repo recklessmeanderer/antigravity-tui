@@ -63,6 +63,10 @@ type Step struct {
 	PlannerResponse *PlannerResponse `json:"plannerResponse,omitempty"`
 	RunCommand      *RunCommandStep  `json:"runCommand,omitempty"`
 	Generic         *GenericStep     `json:"generic,omitempty"`
+	ViewFile        *ViewFileStep    `json:"viewFile,omitempty"`
+	SearchWeb       *SearchWebStep   `json:"searchWeb,omitempty"`
+	McpTool         *McpToolStep     `json:"mcpTool,omitempty"`
+	CodeAction      *CodeActionStep  `json:"codeAction,omitempty"`
 }
 
 type UserInput struct {
@@ -88,13 +92,56 @@ type ToolCall struct {
 }
 
 type RunCommandStep struct {
-	CommandLine string `json:"commandLine"`
-	Output      string `json:"output"`
-	ExitCode    int    `json:"exitCode"`
+	CommandLine    string          `json:"commandLine"`
+	Output         string          `json:"output"`
+	CombinedOutput json.RawMessage `json:"combinedOutput,omitempty"`
+	ExitCode       int             `json:"exitCode"`
+}
+
+func (s *RunCommandStep) GetOutput() string {
+	if len(s.CombinedOutput) > 0 {
+		var str string
+		if err := json.Unmarshal(s.CombinedOutput, &str); err == nil && str != "" {
+			return str
+		}
+		var obj struct {
+			Full string `json:"full"`
+		}
+		if err := json.Unmarshal(s.CombinedOutput, &obj); err == nil && obj.Full != "" {
+			return obj.Full
+		}
+	}
+	return s.Output
 }
 
 type GenericStep struct {
 	Content string `json:"content"`
+}
+
+type ViewFileStep struct {
+	AbsolutePathURI string `json:"absolutePathUri"`
+	Content         string `json:"content"`
+}
+
+type SearchWebStep struct {
+	Query   string `json:"query"`
+	Summary string `json:"summary"`
+}
+
+type McpToolStep struct {
+	ServerName   string   `json:"serverName"`
+	ToolCall     ToolCall `json:"toolCall"`
+	ResultString string   `json:"resultString"`
+}
+
+type CodeActionStep struct {
+	ActionSpec struct {
+		CreateFile *struct {
+			Path struct {
+				AbsoluteURI string `json:"absoluteUri"`
+			} `json:"path"`
+		} `json:"createFile"`
+	} `json:"actionSpec"`
 }
 
 type GetCascadeTrajectoryStepsPayload struct {
