@@ -157,26 +157,42 @@ func (m Model) renderButtonBar() (string, []ButtonHitbox) {
 	// 2. Open / Expand Button
 	addBtn("open", "␣ Open", btnStyle)
 
-	// 3. New Chat Button
-	addBtn("new_chat", "+ Chat (Ctrl+N)", btnStyle)
+	// Responsive labels for compact widths
+	chatLabel := "+ Chat (Ctrl+N)"
+	delChatLabel := "🗑 Del Chat (Ctrl+D)"
+	projLabel := "+ Proj (Ctrl+P)"
+	delProjLabel := "🗑 Del Proj (Alt+D)"
+	refreshLabel := "⟳ Refresh"
+	quitLabel := "✕ Quit (Ctrl+C)"
 
-	// 4. New Project Button
-	addBtn("new_proj", "+ Proj (Ctrl+P)", btnStyle)
-
-	// 5. Delete Button (Context-aware: Conversation vs Project)
-	delLabel := "🗑 Del (Ctrl+X)"
-	if len(m.visibleNodes) > 0 && m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
-		if m.visibleNodes[m.selectedNodeIdx].IsHeader {
-			delLabel = "🗑 Del Proj (Ctrl+X)"
+	if m.width > 0 && m.width < 135 {
+		chatLabel = "+ Chat"
+		delChatLabel = "🗑 Del Chat"
+		projLabel = "+ Proj"
+		delProjLabel = "🗑 Del Proj"
+		quitLabel = "✕ Quit"
+		if m.width < 95 {
+			refreshLabel = "⟳"
 		}
 	}
-	addBtn("del", delLabel, btnDangerStyle)
 
-	// 6. Refresh Button
-	addBtn("refresh", "⟳ Refresh", btnStyle)
+	// 3. New Chat Button
+	addBtn("new_chat", chatLabel, btnStyle)
 
-	// 7. Quit Button
-	addBtn("quit", "✕ Quit (Ctrl+C)", btnQuitStyle)
+	// 4. Delete Chat Button
+	addBtn("del_chat", delChatLabel, btnDangerStyle)
+
+	// 5. New Project Button
+	addBtn("new_proj", projLabel, btnStyle)
+
+	// 6. Delete Project Button
+	addBtn("del_proj", delProjLabel, btnDangerStyle)
+
+	// 7. Refresh Button
+	addBtn("refresh", refreshLabel, btnStyle)
+
+	// 8. Quit Button
+	addBtn("quit", quitLabel, btnQuitStyle)
 
 	buttonBar := strings.Join(renderedBtns, " ")
 	return buttonBar, hitboxes

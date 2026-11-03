@@ -62,11 +62,13 @@ type Model struct {
 	lastUpdate       time.Time
 
 	// Modal / interactive action states
-	modalMode        ModalMode
-	modalInput       string
-	deleteTargetName string
-	deleteTargetID   string
-	deleteIsProject  bool
+	modalMode            ModalMode
+	modalInput           string
+	deleteTargetName     string
+	deleteTargetID       string
+	deleteIsProject      bool
+	createdConversations map[string]hub.ConversationItem
+	deletedCascadeIDs    map[string]bool
 }
 
 // Msg types
@@ -120,10 +122,12 @@ func NewModel(client *hub.Client, hubInfo *hub.HubInfo) Model {
 		sidebarOffset:   0,
 		viewport:        vp,
 		input:           ta,
-		spinner:         sp,
-		focusedPane:     FocusInput,
-		statusMsg:       "Connected to Antigravity Hub",
-		lastUpdate:      time.Now(),
+		spinner:              sp,
+		focusedPane:          FocusInput,
+		statusMsg:            "Connected to Antigravity Hub",
+		lastUpdate:           time.Now(),
+		createdConversations: make(map[string]hub.ConversationItem),
+		deletedCascadeIDs:    make(map[string]bool),
 	}
 }
 
@@ -378,7 +382,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case conversationsLoadedMsg:
-		m.conversations = msg.items
+		// Filter out any conversations deleted locally
+		var merged []hub.ConversationItem
+		seen := make(map[string]bool)
+
+		for _, item := range msg.items {
+			if m.deletedCascadeIDs[item.CascadeID] {
+				continue
+			}
+			merged = append(merged, item)
+			seen[item.CascadeID] = true
+		}
+
+		// Re-add any locally created conversations that the hub doesn't report yet
+		for id, conv := range m.createdConversations {
+			if !m.deletedCascadeIDs[id] && !seen[id] {
+				merged = append([]hub.ConversationItem{conv}, merged...)
+				seen[id] = true
+			}
+		}
+
+		m.conversations = merged
 		m.rebuildTree()
 		m.statusMsg = fmt.Sprintf("Connected (Port %d, %d projects, %d sessions)",
 			m.hubInfo.HttpPort, len(m.projectGroups), len(m.conversations))
@@ -497,14 +521,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "ctrl+n":
-			return m, m.createNewConversation("")
+			cmd := m.createNewConversation("")
+			return m, cmd
 
 		case "ctrl+p":
 			m.startNewProjectPrompt()
 			return m, nil
 
-		case "ctrl+x":
-			m.startDeletePrompt()
+		case "ctrl+d", "ctrl+x", "delete":
+			m.startDeleteChatPrompt()
+			return m, nil
+
+		case "alt+d", "alt+delete":
+			m.startDeleteProjPrompt()
 			return m, nil
 
 		case "tab":
@@ -595,12 +624,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case "n":
-				return m, m.createNewConversation("")
+				cmd := m.createNewConversation("")
+				return m, cmd
 			case "p":
 				m.startNewProjectPrompt()
 				return m, nil
-			case "x", "delete":
-				m.startDeletePrompt()
+			case "x":
+				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) && m.visibleNodes[m.selectedNodeIdx].IsHeader {
+					m.startDeleteProjPrompt()
+				} else {
+					m.startDeleteChatPrompt()
+				}
 				return m, nil
 			}
 
@@ -729,6 +763,13 @@ func (m *Model) createNewConversation(projectName string) tea.Cmd {
 		projectName = "General"
 		if len(m.visibleNodes) > 0 && m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
 			projectName = m.visibleNodes[m.selectedNodeIdx].ProjectName
+		} else if m.activeCascadeID != "" {
+			for _, c := range m.conversations {
+				if c.CascadeID == m.activeCascadeID && c.WorkspaceName != "" {
+					projectName = c.WorkspaceName
+					break
+				}
+			}
 		}
 	}
 
@@ -742,11 +783,26 @@ func (m *Model) createNewConversation(projectName string) tea.Cmd {
 		LastModifiedTime: now,
 	}
 
+	if m.createdConversations == nil {
+		m.createdConversations = make(map[string]hub.ConversationItem)
+	}
+	m.createdConversations[newID] = newConv
+	delete(m.deletedCascadeIDs, newID)
+
 	m.conversations = append([]hub.ConversationItem{newConv}, m.conversations...)
 	m.activeCascadeID = newID
 	m.steps = nil
 	m.expandedState[projectName] = true
 	m.rebuildTree()
+
+	// Move cursor to the new conversation in sidebar
+	for i, node := range m.visibleNodes {
+		if !node.IsHeader && node.Conversation != nil && node.Conversation.CascadeID == newID {
+			m.selectedNodeIdx = i
+			break
+		}
+	}
+
 	m.focusedPane = FocusInput
 	m.input.Reset()
 	m.input.Focus()
@@ -763,34 +819,92 @@ func (m *Model) startNewProjectPrompt() {
 	m.statusMsg = "📁 Create Project: Type project name and press Enter (Esc to cancel)"
 }
 
-func (m *Model) startDeletePrompt() {
-	if len(m.visibleNodes) == 0 {
-		m.statusMsg = "No conversations to delete."
+func (m *Model) startDeleteChatPrompt() {
+	var targetConv *hub.ConversationItem
+
+	// 1. If currently highlighted node in sidebar is a conversation, target it
+	if m.focusedPane == FocusSidebar && m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+		node := m.visibleNodes[m.selectedNodeIdx]
+		if !node.IsHeader && node.Conversation != nil {
+			targetConv = node.Conversation
+		}
+	}
+
+	// 2. Otherwise target the currently active/open conversation
+	if targetConv == nil && m.activeCascadeID != "" {
+		for i := range m.conversations {
+			if m.conversations[i].CascadeID == m.activeCascadeID {
+				targetConv = &m.conversations[i]
+				break
+			}
+		}
+	}
+
+	if targetConv == nil {
+		m.statusMsg = "No conversation selected to delete."
 		return
 	}
-	if m.selectedNodeIdx < 0 || m.selectedNodeIdx >= len(m.visibleNodes) {
-		m.statusMsg = "Select a conversation or project to delete."
-		return
-	}
-	node := m.visibleNodes[m.selectedNodeIdx]
+
 	m.modalMode = ModalConfirmDelete
-	if node.IsHeader {
-		m.deleteIsProject = true
-		m.deleteTargetName = node.ProjectName
-		m.deleteTargetID = ""
-		m.statusMsg = fmt.Sprintf("⚠️ Delete project '%s' and all its chats? (y/n)", node.ProjectName)
-	} else if node.Conversation != nil {
-		m.deleteIsProject = false
-		m.deleteTargetName = node.Conversation.Title
-		m.deleteTargetID = node.Conversation.CascadeID
-		m.statusMsg = fmt.Sprintf("⚠️ Delete conversation '%s'? (y/n)", node.Conversation.Title)
+	m.deleteIsProject = false
+	m.deleteTargetID = targetConv.CascadeID
+	m.deleteTargetName = targetConv.Title
+	if m.deleteTargetName == "" {
+		m.deleteTargetName = targetConv.CascadeID
 	}
+	m.statusMsg = fmt.Sprintf("⚠️ Delete conversation '%s'? (y/n)", m.deleteTargetName)
+}
+
+func (m *Model) startDeleteProjPrompt() {
+	targetProj := ""
+
+	// 1. If currently highlighted node in sidebar has a project name, target it
+	if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+		targetProj = m.visibleNodes[m.selectedNodeIdx].ProjectName
+	}
+
+	// 2. Otherwise target the project of the active conversation
+	if targetProj == "" && m.activeCascadeID != "" {
+		for i := range m.conversations {
+			if m.conversations[i].CascadeID == m.activeCascadeID {
+				targetProj = m.conversations[i].WorkspaceName
+				break
+			}
+		}
+	}
+
+	if targetProj == "" {
+		m.statusMsg = "No project selected to delete."
+		return
+	}
+
+	m.modalMode = ModalConfirmDelete
+	m.deleteIsProject = true
+	m.deleteTargetName = targetProj
+	m.deleteTargetID = ""
+	m.statusMsg = fmt.Sprintf("⚠️ Delete project '%s' and all its chats? (y/n)", targetProj)
 }
 
 func (m *Model) executeDeleteCmd() tea.Cmd {
 	isProj := m.deleteIsProject
 	targetID := m.deleteTargetID
 	targetName := m.deleteTargetName
+
+	if m.deletedCascadeIDs == nil {
+		m.deletedCascadeIDs = make(map[string]bool)
+	}
+
+	if isProj {
+		for _, conv := range m.conversations {
+			if conv.WorkspaceName == targetName {
+				m.deletedCascadeIDs[conv.CascadeID] = true
+				delete(m.createdConversations, conv.CascadeID)
+			}
+		}
+	} else {
+		m.deletedCascadeIDs[targetID] = true
+		delete(m.createdConversations, targetID)
+	}
 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -841,11 +955,14 @@ func (m *Model) triggerAction(actionID string) tea.Cmd {
 			}
 		}
 	case "new_chat":
-		return m.createNewConversation("")
+		cmd := m.createNewConversation("")
+		return cmd
+	case "del_chat":
+		m.startDeleteChatPrompt()
 	case "new_proj":
 		m.startNewProjectPrompt()
-	case "del":
-		m.startDeletePrompt()
+	case "del_proj":
+		m.startDeleteProjPrompt()
 	case "refresh":
 		m.statusMsg = "Refreshing conversations..."
 		cmds = append(cmds, m.loadConversationsCmd())

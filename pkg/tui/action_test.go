@@ -30,6 +30,13 @@ func TestActionsKeyboardAndMouse(t *testing.T) {
 		t.Fatalf("Unexpected statusMsg: %s", m.statusMsg)
 	}
 
+	// Verify periodic tick / conversationsLoadedMsg does NOT wipe out the new conversation
+	updated, _ = m.Update(conversationsLoadedMsg{items: convs})
+	m = updated.(Model)
+	if len(m.conversations) != 2 {
+		t.Fatalf("Expected 2 conversations preserved across hub sync, got %d", len(m.conversations))
+	}
+
 	// 2. Test New Project Prompt (Ctrl+P)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 	m = updated.(Model)
@@ -57,11 +64,21 @@ func TestActionsKeyboardAndMouse(t *testing.T) {
 		t.Fatalf("Expected first conversation workspace 'cool-app', got '%s'", m.conversations[0].WorkspaceName)
 	}
 
-	// 3. Test Delete Prompt (Ctrl+X)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	// Verify new project is preserved across background sync
+	updated, _ = m.Update(conversationsLoadedMsg{items: convs})
+	m = updated.(Model)
+	if len(m.conversations) != 3 {
+		t.Fatalf("Expected 3 conversations preserved after second hub sync, got %d", len(m.conversations))
+	}
+
+	// 3. Test Delete Chat Prompt (Ctrl+D)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	m = updated.(Model)
 	if m.modalMode != ModalConfirmDelete {
 		t.Fatalf("Expected modalMode ModalConfirmDelete, got %v", m.modalMode)
+	}
+	if m.deleteIsProject {
+		t.Fatalf("Expected deleteIsProject=false for Delete Chat, got true")
 	}
 	// Cancel with 'n'
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
@@ -69,30 +86,27 @@ func TestActionsKeyboardAndMouse(t *testing.T) {
 	if m.modalMode != ModalNone {
 		t.Fatalf("Expected modalMode ModalNone after cancel, got %v", m.modalMode)
 	}
-	if len(m.conversations) != 3 {
-		t.Fatalf("Conversation count changed after cancel delete: %d", len(m.conversations))
-	}
 
-	// 4. Test Mouse Click on "+ Chat (Ctrl+N)" button
+	// 4. Test Mouse Click on "🗑 Del Chat (Ctrl+D)" button
 	_, hitboxes := m.renderButtonBar()
-	var newChatBtn *ButtonHitbox
+	var delChatBtn *ButtonHitbox
 	for i := range hitboxes {
-		if hitboxes[i].ID == "new_chat" {
-			newChatBtn = &hitboxes[i]
+		if hitboxes[i].ID == "del_chat" {
+			delChatBtn = &hitboxes[i]
 			break
 		}
 	}
-	if newChatBtn == nil {
-		t.Fatalf("Could not find new_chat button in hitboxes")
+	if delChatBtn == nil {
+		t.Fatalf("Could not find del_chat button in hitboxes")
 	}
-	clickX := (newChatBtn.MinX + newChatBtn.MaxX) / 2
+	clickX := (delChatBtn.MinX + delChatBtn.MaxX) / 2
 	updated, _ = m.Update(tea.MouseMsg{
 		X: clickX,
 		Y: m.height - 1,
 		Type: tea.MouseLeft,
 	})
 	m = updated.(Model)
-	if len(m.conversations) != 4 {
-		t.Fatalf("Expected 4 conversations after clicking + Chat button, got %d", len(m.conversations))
+	if m.modalMode != ModalConfirmDelete {
+		t.Fatalf("Expected ModalConfirmDelete after clicking del_chat, got %v", m.modalMode)
 	}
 }
