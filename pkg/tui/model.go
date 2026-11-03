@@ -28,7 +28,11 @@ type Model struct {
 	client           *hub.Client
 	hubInfo          *hub.HubInfo
 	conversations    []hub.ConversationItem
-	selectedIdx      int
+	projectGroups    []*ProjectGroup
+	visibleNodes     []SidebarNode
+	selectedNodeIdx  int
+	sidebarOffset    int
+	expandedState    map[string]bool
 	activeCascadeID  string
 	steps            []hub.Step
 	viewport         viewport.Model
@@ -78,16 +82,18 @@ func NewModel(client *hub.Client, hubInfo *hub.HubInfo) Model {
 	sp.Style = lipgloss.NewStyle().Foreground(primaryColor)
 
 	return Model{
-		client:        client,
-		hubInfo:       hubInfo,
-		conversations: nil,
-		selectedIdx:   0,
-		viewport:      vp,
-		input:         ta,
-		spinner:       sp,
-		focusedPane:   FocusInput,
-		statusMsg:     "Connected to Antigravity Hub",
-		lastUpdate:    time.Now(),
+		client:          client,
+		hubInfo:         hubInfo,
+		conversations:   nil,
+		expandedState:   make(map[string]bool), // all start collapsed by default
+		selectedNodeIdx: 0,
+		sidebarOffset:   0,
+		viewport:        vp,
+		input:           ta,
+		spinner:         sp,
+		focusedPane:     FocusInput,
+		statusMsg:       "Connected to Antigravity Hub",
+		lastUpdate:      time.Now(),
 	}
 }
 
@@ -100,7 +106,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) periodicTickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 		return periodicTickMsg(t)
 	})
 }
@@ -184,6 +190,39 @@ func (m *Model) startStreamingUpdates(cascadeID string) tea.Cmd {
 	}
 }
 
+func (m *Model) rebuildTree() {
+	m.projectGroups, m.visibleNodes = BuildProjectGroups(m.conversations, m.expandedState)
+
+	if len(m.visibleNodes) == 0 {
+		m.selectedNodeIdx = 0
+		m.sidebarOffset = 0
+		return
+	}
+
+	if m.selectedNodeIdx >= len(m.visibleNodes) {
+		m.selectedNodeIdx = len(m.visibleNodes) - 1
+	}
+	if m.selectedNodeIdx < 0 {
+		m.selectedNodeIdx = 0
+	}
+
+	// Keep sidebar scroll in view
+	maxVisible := m.height - 5
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+
+	if m.selectedNodeIdx < m.sidebarOffset {
+		m.sidebarOffset = m.selectedNodeIdx
+	}
+	if m.selectedNodeIdx >= m.sidebarOffset+maxVisible {
+		m.sidebarOffset = m.selectedNodeIdx - maxVisible + 1
+	}
+	if m.sidebarOffset < 0 {
+		m.sidebarOffset = 0
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		cmd  tea.Cmd
@@ -195,6 +234,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.recalculateLayout()
+
+	case tea.MouseMsg:
+		sidebarWidth := 36
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			if msg.X < sidebarWidth {
+				// Scroll sidebar up
+				if m.sidebarOffset > 0 {
+					m.sidebarOffset--
+				}
+			} else {
+				// Scroll chat transcript up
+				m.viewport.LineUp(3)
+			}
+		case tea.MouseWheelDown:
+			if msg.X < sidebarWidth {
+				// Scroll sidebar down
+				maxVisible := m.height - 5
+				if m.sidebarOffset+maxVisible < len(m.visibleNodes) {
+					m.sidebarOffset++
+				}
+			} else {
+				// Scroll chat transcript down
+				m.viewport.LineDown(3)
+			}
+		}
 
 	case spinner.TickMsg:
 		var spCmd tea.Cmd
@@ -209,10 +274,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case conversationsLoadedMsg:
 		m.conversations = msg.items
-		m.statusMsg = fmt.Sprintf("Connected (Port %d, %d sessions)", m.hubInfo.HttpPort, len(m.conversations))
-		if len(m.conversations) > 0 && m.activeCascadeID == "" {
+		m.rebuildTree()
+		m.statusMsg = fmt.Sprintf("Connected (Port %d, %d projects, %d sessions)",
+			m.hubInfo.HttpPort, len(m.projectGroups), len(m.conversations))
+
+		// If no conversation currently loaded, select the first conversation available
+		if m.activeCascadeID == "" && len(m.conversations) > 0 {
 			m.activeCascadeID = m.conversations[0].CascadeID
-			m.selectedIdx = 0
 			cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 		}
 
@@ -274,39 +342,115 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case FocusSidebar:
 			switch msg.String() {
 			case "up", "k":
-				if m.selectedIdx > 0 {
-					m.selectedIdx--
-					m.activeCascadeID = m.conversations[m.selectedIdx].CascadeID
-					cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
+				if m.selectedNodeIdx > 0 {
+					m.selectedNodeIdx--
+					m.rebuildTree()
 				}
 			case "down", "j":
-				if m.selectedIdx < len(m.conversations)-1 {
-					m.selectedIdx++
-					m.activeCascadeID = m.conversations[m.selectedIdx].CascadeID
-					cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
+				if m.selectedNodeIdx < len(m.visibleNodes)-1 {
+					m.selectedNodeIdx++
+					m.rebuildTree()
 				}
-			case "enter":
-				m.focusedPane = FocusInput
-				m.input.Focus()
+			case "enter", " ":
+				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+					node := m.visibleNodes[m.selectedNodeIdx]
+					if node.IsHeader {
+						// Toggle project collapse / expand
+						m.expandedState[node.ProjectName] = !m.expandedState[node.ProjectName]
+						m.rebuildTree()
+					} else if node.Conversation != nil {
+						// Select conversation and load
+						m.activeCascadeID = node.Conversation.CascadeID
+						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
+						m.focusedPane = FocusInput
+						m.input.Focus()
+					}
+				}
+			case "right", "l":
+				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+					node := m.visibleNodes[m.selectedNodeIdx]
+					if node.IsHeader && !m.expandedState[node.ProjectName] {
+						m.expandedState[node.ProjectName] = true
+						m.rebuildTree()
+					}
+				}
+			case "left", "h":
+				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+					node := m.visibleNodes[m.selectedNodeIdx]
+					if node.IsHeader && m.expandedState[node.ProjectName] {
+						m.expandedState[node.ProjectName] = false
+						m.rebuildTree()
+					} else if !node.IsHeader {
+						// Jump up to parent project header
+						for i := m.selectedNodeIdx - 1; i >= 0; i-- {
+							if m.visibleNodes[i].IsHeader && m.visibleNodes[i].ProjectName == node.ProjectName {
+								m.selectedNodeIdx = i
+								m.rebuildTree()
+								break
+							}
+						}
+					}
+				}
 			}
 
 		case FocusInput:
-			if msg.Type == tea.KeyEnter && !msg.Alt {
-				text := strings.TrimSpace(m.input.Value())
-				if text != "" {
-					m.input.Reset()
-					m.statusMsg = "Sent message to agent..."
-					cmds = append(cmds, m.sendMessageCmd(text))
-					if m.activeCascadeID != "" {
-						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+			switch msg.Type {
+			case tea.KeyPgUp:
+				m.viewport.HalfViewUp()
+				return m, nil
+			case tea.KeyPgDown:
+				m.viewport.HalfViewDown()
+				return m, nil
+			case tea.KeyEnter:
+				if !msg.Alt {
+					text := strings.TrimSpace(m.input.Value())
+					if text != "" {
+						m.input.Reset()
+						m.statusMsg = "Sent message to agent..."
+						cmds = append(cmds, m.sendMessageCmd(text))
+						if m.activeCascadeID != "" {
+							cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+						}
 					}
+					return m, tea.Batch(cmds...)
 				}
-				return m, tea.Batch(cmds...)
 			}
+
+			// Handle Ctrl+U / Ctrl+D for scrolling transcript from input
+			if msg.String() == "ctrl+u" {
+				m.viewport.HalfViewUp()
+				return m, nil
+			}
+			if msg.String() == "ctrl+d" {
+				m.viewport.HalfViewDown()
+				return m, nil
+			}
+
 			m.input, cmd = m.input.Update(msg)
 			cmds = append(cmds, cmd)
 
 		case FocusChat:
+			switch msg.String() {
+			case "up", "k":
+				m.viewport.LineUp(1)
+				return m, nil
+			case "down", "j":
+				m.viewport.LineDown(1)
+				return m, nil
+			case "pgup":
+				m.viewport.HalfViewUp()
+				return m, nil
+			case "pgdown":
+				m.viewport.HalfViewDown()
+				return m, nil
+			case "home", "g":
+				m.viewport.GotoTop()
+				return m, nil
+			case "end", "G":
+				m.viewport.GotoBottom()
+				return m, nil
+			}
+
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
 		}
@@ -336,5 +480,6 @@ func (m *Model) recalculateLayout() {
 	m.viewport.Height = viewportHeight
 	m.input.SetWidth(contentWidth - 4)
 
+	m.rebuildTree()
 	m.viewport.SetContent(m.renderTranscript())
 }

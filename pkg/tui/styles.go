@@ -50,6 +50,27 @@ var (
 			BorderForeground(activeBorder).
 			Padding(0, 1)
 
+	// Project Tree Styles
+	projectHeaderNormal = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#CBD5E1")).
+				Background(lipgloss.Color("#1E212B")).
+				Padding(0, 1)
+
+	projectHeaderSelected = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(textColor).
+				Background(primaryColor).
+				Padding(0, 1)
+
+	iconExpanded = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(accentColor)
+
+	iconCollapsed = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(subduedColor)
+
 	// Conversation List Items
 	selectedItemStyle = lipgloss.NewStyle().
 				Bold(true).

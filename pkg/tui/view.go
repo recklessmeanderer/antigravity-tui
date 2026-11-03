@@ -40,18 +40,20 @@ func (m Model) View() string {
 	// 3. Right Pane (Chat Viewport + Input Box)
 	convTitle := "No session selected"
 	convStatus := ""
-	if len(m.conversations) > 0 && m.selectedIdx < len(m.conversations) {
-		active := m.conversations[m.selectedIdx]
-		if active.Title != "" {
-			convTitle = active.Title
-		} else {
-			convTitle = active.CascadeID
-		}
+	for _, conv := range m.conversations {
+		if conv.CascadeID == m.activeCascadeID {
+			if conv.Title != "" {
+				convTitle = conv.Title
+			} else {
+				convTitle = conv.CascadeID
+			}
 
-		if active.Status == "CASCADE_RUN_STATUS_RUNNING" {
-			convStatus = badgeRunning.Render("● AGENT RUNNING " + m.spinner.View())
-		} else {
-			convStatus = badgeIdle.Render(active.Status)
+			if conv.Status == "CASCADE_RUN_STATUS_RUNNING" {
+				convStatus = badgeRunning.Render("● AGENT RUNNING " + m.spinner.View())
+			} else {
+				convStatus = badgeIdle.Render(conv.Status)
+			}
+			break
 		}
 	}
 
@@ -91,11 +93,11 @@ func (m Model) View() string {
 
 	// 5. Bottom Statusline
 	statusline := statusBarStyle.Width(m.width).Render(
-		keybindStyle.Render("[Tab]") + " Switch Pane  " +
-			keybindStyle.Render("[↑/↓]") + " Select/Scroll  " +
-			keybindStyle.Render("[Enter]") + " Send Message  " +
+		keybindStyle.Render("[Tab]") + " Pane  " +
+			keybindStyle.Render("[Enter/Space]") + " Expand/Open  " +
+			keybindStyle.Render("[PgUp/PgDn / MouseWheel]") + " Scroll  " +
 			keybindStyle.Render("[r]") + " Refresh  " +
-			keybindStyle.Render("[Esc]") + " Stop / Unfocus  " +
+			keybindStyle.Render("[Esc]") + " Stop/Back  " +
 			keybindStyle.Render("[Ctrl+C]") + " Quit",
 	)
 
@@ -108,61 +110,89 @@ func (m Model) View() string {
 
 func (m Model) renderSidebar(width int) string {
 	var b strings.Builder
-	header := fmt.Sprintf("SESSIONS (%d)", len(m.conversations))
+	header := fmt.Sprintf("PROJECTS (%d)", len(m.projectGroups))
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(primaryColor).Render(header))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
-	if len(m.conversations) == 0 {
-		b.WriteString(normalItemStyle.Render("No conversations found.\nPress 'r' to refresh."))
+	if len(m.visibleNodes) == 0 {
+		b.WriteString("\n" + normalItemStyle.Render("No conversations found.\nPress 'r' to refresh."))
 		return b.String()
 	}
 
-	for i, item := range m.conversations {
-		name := item.Title
-		if name == "" {
-			name = item.CascadeID[:12] + "..."
-		}
+	maxVisible := m.height - 7
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
 
-		// Truncate name to fit width
-		maxLen := width - 6
-		if maxLen > 4 && len(name) > maxLen {
-			name = name[:maxLen-3] + "..."
-		}
+	start := m.sidebarOffset
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxVisible
+	if end > len(m.visibleNodes) {
+		end = len(m.visibleNodes)
+	}
 
-		statusPill := "•"
-		if item.Status == "CASCADE_RUN_STATUS_RUNNING" {
-			statusPill = "▶"
-		}
+	// Scroll indicator top
+	if start > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(accentColor).Render(fmt.Sprintf("  ▲ %d more above\n", start)))
+	} else {
+		b.WriteString("\n")
+	}
 
-		line := fmt.Sprintf("%s %s", statusPill, name)
-		meta := ""
-		if item.StepCount > 0 {
-			meta = fmt.Sprintf("  %d steps", item.StepCount)
-		} else if item.Snippet != "" {
-			snip := strings.ReplaceAll(item.Snippet, "\n", " ")
-			if len(snip) > width-8 {
-				snip = snip[:width-11] + "..."
+	for i := start; i < end; i++ {
+		node := m.visibleNodes[i]
+		isSelected := (i == m.selectedNodeIdx)
+
+		if node.IsHeader {
+			isExpanded := m.expandedState[node.ProjectName]
+			icon := "▶"
+			if isExpanded {
+				icon = "▼"
 			}
-			meta = "  " + snip
-		}
+			label := fmt.Sprintf("%s %s (%d)", icon, node.ProjectName, node.Count)
 
-		if i == m.selectedIdx {
-			b.WriteString(selectedItemStyle.Width(width - 4).Render("❯ " + line))
-			b.WriteString("\n")
-			if meta != "" {
-				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#A0AEC0")).Render(meta))
-				b.WriteString("\n")
+			maxLen := width - 4
+			if len(label) > maxLen {
+				label = label[:maxLen-3] + "..."
+			}
+
+			if isSelected {
+				b.WriteString(projectHeaderSelected.Width(width - 4).Render(label))
+			} else {
+				b.WriteString(projectHeaderNormal.Width(width - 4).Render(label))
 			}
 			b.WriteString("\n")
-		} else {
-			b.WriteString(normalItemStyle.Width(width - 4).Render("  " + line))
-			b.WriteString("\n")
-			if meta != "" {
-				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#555A64")).Render(meta))
-				b.WriteString("\n")
+		} else if node.Conversation != nil {
+			conv := node.Conversation
+			name := conv.Title
+			if name == "" {
+				name = conv.CascadeID[:10] + "..."
+			}
+
+			statusPill := "•"
+			if conv.Status == "CASCADE_RUN_STATUS_RUNNING" {
+				statusPill = "▶"
+			}
+
+			line := fmt.Sprintf("  %s %s", statusPill, name)
+			maxLen := width - 4
+			if len(line) > maxLen {
+				line = line[:maxLen-3] + "..."
+			}
+
+			if isSelected {
+				b.WriteString(selectedItemStyle.Width(width - 4).Render("❯" + line[1:]))
+			} else {
+				b.WriteString(normalItemStyle.Width(width - 4).Render(line))
 			}
 			b.WriteString("\n")
 		}
+	}
+
+	// Scroll indicator bottom
+	if end < len(m.visibleNodes) {
+		b.WriteString(lipgloss.NewStyle().Foreground(accentColor).Render(fmt.Sprintf("  ▼ %d more below", len(m.visibleNodes)-end)))
 	}
 
 	return b.String()
