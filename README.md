@@ -4,6 +4,8 @@ A high-performance Terminal User Interface (TUI) client for **Google Antigravity
 
 Designed to run in a terminal on another desktop / workspace in **Hyprland** (or over SSH), connecting directly to the local Antigravity hub socket with zero manual configuration.
 
+![Antigravity TUI Screenshot](assets/screenshot.png)
+
 ---
 
 ## ✨ Features
@@ -72,3 +74,12 @@ antigravity-tui
 | `PgUp` / `PgDn` | Scroll half page up / down |
 | `Home` / `g` | Jump to beginning of conversation |
 | `End` / `G` | Jump to latest message |
+
+### Bottom Statusbar (Mouse Clickable)
+| Button | Action |
+| :--- | :--- |
+| `⇥ Tab: Pane` | Click to cycle focus (**Sidebar** ➔ **Input** ➔ **Chat**) |
+| `␣ Open/Expand` | Click to toggle selected project folder or load conversation |
+| `▲ PgUp` / `▼ PgDn` | Click to scroll conversation history up / down |
+| `⟳ Refresh` | Click to fetch latest projects and conversation states |
+| `✕ Quit (Ctrl+C)` | Click to exit the application |
