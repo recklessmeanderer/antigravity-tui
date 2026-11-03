@@ -24,6 +24,20 @@ const (
 	FocusChat
 )
 
+type ModalMode int
+
+const (
+	ModalNone ModalMode = iota
+	ModalNewProject
+	ModalConfirmDelete
+)
+
+type ButtonHitbox struct {
+	ID   string
+	MinX int
+	MaxX int
+}
+
 type Model struct {
 	client           *hub.Client
 	hubInfo          *hub.HubInfo
@@ -46,11 +60,27 @@ type Model struct {
 	height           int
 	err              error
 	lastUpdate       time.Time
+
+	// Modal / interactive action states
+	modalMode        ModalMode
+	modalInput       string
+	deleteTargetName string
+	deleteTargetID   string
+	deleteIsProject  bool
 }
 
 // Msg types
 type conversationsLoadedMsg struct {
 	items []hub.ConversationItem
+}
+
+type conversationDeletedMsg struct {
+	cascadeID string
+	title     string
+}
+
+type projectDeletedMsg struct {
+	projectName string
 }
 
 type stepsLoadedMsg struct {
@@ -276,53 +306,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseLeft:
 			// 1. Click on bottom statusline bar buttons
 			if msg.Y >= m.height-1 {
-				// Widths of buttons in bottom statusline:
-				// [Tab: Pane] ~ 0..13
-				// [␣ Open/Expand] ~ 14..31
-				// [▲ PgUp] ~ 32..41
-				// [▼ PgDn] ~ 42..51
-				// [⟳ Refresh] ~ 52..65
-				// [✕ Quit (Ctrl+C)] ~ 66..95
-				switch {
-				case msg.X >= 0 && msg.X <= 13:
-					m.cyclePaneFocus()
-					return m, nil
-				case msg.X >= 14 && msg.X <= 31:
-					// Open or expand current selection
-					if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
-						node := m.visibleNodes[m.selectedNodeIdx]
-						if node.IsHeader {
-							m.expandedState[node.ProjectName] = !m.expandedState[node.ProjectName]
-							m.rebuildTree()
-						} else if node.Conversation != nil {
-							m.activeCascadeID = node.Conversation.CascadeID
-							m.steps = nil
-							m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("Loading conversation history..."))
-							cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
-							m.focusedPane = FocusInput
-							m.input.Focus()
-						}
-					}
-					return m, tea.Batch(cmds...)
-				case msg.X >= 32 && msg.X <= 41:
-					m.viewport.HalfViewUp()
-					return m, nil
-				case msg.X >= 42 && msg.X <= 51:
-					m.viewport.HalfViewDown()
-					return m, nil
-				case msg.X >= 52 && msg.X <= 65:
-					m.statusMsg = "Refreshing conversations..."
-					cmds = append(cmds, m.loadConversationsCmd())
-					if m.activeCascadeID != "" {
-						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
-					}
-					return m, tea.Batch(cmds...)
-				case msg.X >= 66 && msg.X <= 95:
-					if m.streamCancelFunc != nil {
-						m.streamCancelFunc()
-					}
-					return m, tea.Quit
+				cmd := m.handleBottomBarClick(msg.X)
+				if cmd != nil {
+					return m, cmd
 				}
+				return m, nil
 			}
 
 			// 2. Click in Sidebar area
@@ -408,17 +396,116 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 		}
 
+	case conversationDeletedMsg:
+		var remaining []hub.ConversationItem
+		for _, c := range m.conversations {
+			if c.CascadeID != msg.cascadeID {
+				remaining = append(remaining, c)
+			}
+		}
+		m.conversations = remaining
+		if m.activeCascadeID == msg.cascadeID {
+			if len(m.conversations) > 0 {
+				m.activeCascadeID = m.conversations[0].CascadeID
+				cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+			} else {
+				m.activeCascadeID = ""
+				m.steps = nil
+				m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("No active conversations. Press Ctrl+N to create one."))
+			}
+		}
+		m.rebuildTree()
+		m.statusMsg = fmt.Sprintf("Deleted conversation '%s'", msg.title)
+		return m, tea.Batch(cmds...)
+
+	case projectDeletedMsg:
+		var remaining []hub.ConversationItem
+		for _, c := range m.conversations {
+			if c.WorkspaceName != msg.projectName {
+				remaining = append(remaining, c)
+			}
+		}
+		m.conversations = remaining
+		delete(m.expandedState, msg.projectName)
+		if len(m.conversations) > 0 {
+			m.activeCascadeID = m.conversations[0].CascadeID
+			cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+		} else {
+			m.activeCascadeID = ""
+			m.steps = nil
+			m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("No active conversations. Press Ctrl+P to create a project."))
+		}
+		m.rebuildTree()
+		m.statusMsg = fmt.Sprintf("Deleted project '%s'", msg.projectName)
+		return m, tea.Batch(cmds...)
+
 	case errMsg:
 		m.err = msg.err
 		m.statusMsg = fmt.Sprintf("Error: %v", msg.err)
 
 	case tea.KeyMsg:
+		if m.modalMode == ModalNewProject {
+			switch msg.String() {
+			case "esc":
+				m.modalMode = ModalNone
+				m.modalInput = ""
+				m.statusMsg = "Project creation cancelled."
+				return m, nil
+			case "enter":
+				projName := strings.TrimSpace(m.modalInput)
+				m.modalMode = ModalNone
+				m.modalInput = ""
+				if projName != "" {
+					return m, m.createNewConversation(projName)
+				}
+				m.statusMsg = "Project name cannot be empty."
+				return m, nil
+			case "backspace":
+				if len(m.modalInput) > 0 {
+					m.modalInput = m.modalInput[:len(m.modalInput)-1]
+				}
+				return m, nil
+			default:
+				if len(msg.String()) == 1 {
+					m.modalInput += msg.String()
+				}
+				return m, nil
+			}
+		}
+
+		if m.modalMode == ModalConfirmDelete {
+			switch strings.ToLower(msg.String()) {
+			case "y":
+				m.modalMode = ModalNone
+				return m, m.executeDeleteCmd()
+			case "n", "esc":
+				m.modalMode = ModalNone
+				m.statusMsg = "Delete cancelled."
+				return m, nil
+			default:
+				m.modalMode = ModalNone
+				m.statusMsg = "Delete cancelled."
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			if m.streamCancelFunc != nil {
 				m.streamCancelFunc()
 			}
 			return m, tea.Quit
+
+		case "ctrl+n":
+			return m, m.createNewConversation("")
+
+		case "ctrl+p":
+			m.startNewProjectPrompt()
+			return m, nil
+
+		case "ctrl+x":
+			m.startDeletePrompt()
+			return m, nil
 
 		case "tab":
 			m.cyclePaneFocus()
@@ -507,6 +594,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+			case "n":
+				return m, m.createNewConversation("")
+			case "p":
+				m.startNewProjectPrompt()
+				return m, nil
+			case "x", "delete":
+				m.startDeletePrompt()
+				return m, nil
 			}
 
 		case FocusInput:
@@ -524,6 +619,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.input.Reset()
 						m.statusMsg = "Sent message to agent..."
 						cmds = append(cmds, m.sendMessageCmd(text))
+						for i := range m.conversations {
+							if m.conversations[i].CascadeID == m.activeCascadeID && m.conversations[i].Title == "New Conversation" {
+								firstLine := strings.Split(text, "\n")[0]
+								if len(firstLine) > 35 {
+									firstLine = firstLine[:32] + "..."
+								}
+								m.conversations[i].Title = firstLine
+								m.rebuildTree()
+								break
+							}
+						}
 						if m.activeCascadeID != "" {
 							cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
 						}
@@ -616,4 +722,141 @@ func (m *Model) recalculateLayout() {
 	if len(m.steps) > 0 {
 		m.viewport.SetContent(m.renderTranscript())
 	}
+}
+
+func (m *Model) createNewConversation(projectName string) tea.Cmd {
+	if projectName == "" {
+		projectName = "General"
+		if len(m.visibleNodes) > 0 && m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+			projectName = m.visibleNodes[m.selectedNodeIdx].ProjectName
+		}
+	}
+
+	newID := hub.NewUUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	newConv := hub.ConversationItem{
+		CascadeID:        newID,
+		Title:            "New Conversation",
+		WorkspaceName:    projectName,
+		Status:           "CASCADE_RUN_STATUS_IDLE",
+		LastModifiedTime: now,
+	}
+
+	m.conversations = append([]hub.ConversationItem{newConv}, m.conversations...)
+	m.activeCascadeID = newID
+	m.steps = nil
+	m.expandedState[projectName] = true
+	m.rebuildTree()
+	m.focusedPane = FocusInput
+	m.input.Reset()
+	m.input.Focus()
+	m.statusMsg = fmt.Sprintf("✨ Started new conversation in '%s'", projectName)
+	m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render(
+		fmt.Sprintf("✨ New conversation created in '%s'.\n\nType your message below and press Enter to start working with the agent.", projectName),
+	))
+	return nil
+}
+
+func (m *Model) startNewProjectPrompt() {
+	m.modalMode = ModalNewProject
+	m.modalInput = ""
+	m.statusMsg = "📁 Create Project: Type project name and press Enter (Esc to cancel)"
+}
+
+func (m *Model) startDeletePrompt() {
+	if len(m.visibleNodes) == 0 {
+		m.statusMsg = "No conversations to delete."
+		return
+	}
+	if m.selectedNodeIdx < 0 || m.selectedNodeIdx >= len(m.visibleNodes) {
+		m.statusMsg = "Select a conversation or project to delete."
+		return
+	}
+	node := m.visibleNodes[m.selectedNodeIdx]
+	m.modalMode = ModalConfirmDelete
+	if node.IsHeader {
+		m.deleteIsProject = true
+		m.deleteTargetName = node.ProjectName
+		m.deleteTargetID = ""
+		m.statusMsg = fmt.Sprintf("⚠️ Delete project '%s' and all its chats? (y/n)", node.ProjectName)
+	} else if node.Conversation != nil {
+		m.deleteIsProject = false
+		m.deleteTargetName = node.Conversation.Title
+		m.deleteTargetID = node.Conversation.CascadeID
+		m.statusMsg = fmt.Sprintf("⚠️ Delete conversation '%s'? (y/n)", node.Conversation.Title)
+	}
+}
+
+func (m *Model) executeDeleteCmd() tea.Cmd {
+	isProj := m.deleteIsProject
+	targetID := m.deleteTargetID
+	targetName := m.deleteTargetName
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if isProj {
+			for _, conv := range m.conversations {
+				if conv.WorkspaceName == targetName {
+					_ = m.client.DeleteCascade(ctx, conv.CascadeID)
+				}
+			}
+			return projectDeletedMsg{projectName: targetName}
+		}
+
+		_ = m.client.DeleteCascade(ctx, targetID)
+		return conversationDeletedMsg{cascadeID: targetID, title: targetName}
+	}
+}
+
+func (m *Model) handleBottomBarClick(x int) tea.Cmd {
+	_, hitboxes := m.renderButtonBar()
+	for _, btn := range hitboxes {
+		if x >= btn.MinX && x <= btn.MaxX {
+			return m.triggerAction(btn.ID)
+		}
+	}
+	return nil
+}
+
+func (m *Model) triggerAction(actionID string) tea.Cmd {
+	var cmds []tea.Cmd
+	switch actionID {
+	case "tab":
+		m.cyclePaneFocus()
+	case "open":
+		if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+			node := m.visibleNodes[m.selectedNodeIdx]
+			if node.IsHeader {
+				m.expandedState[node.ProjectName] = !m.expandedState[node.ProjectName]
+				m.rebuildTree()
+			} else if node.Conversation != nil {
+				m.activeCascadeID = node.Conversation.CascadeID
+				m.steps = nil
+				m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render("Loading conversation history..."))
+				cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
+				m.focusedPane = FocusInput
+				m.input.Focus()
+			}
+		}
+	case "new_chat":
+		return m.createNewConversation("")
+	case "new_proj":
+		m.startNewProjectPrompt()
+	case "del":
+		m.startDeletePrompt()
+	case "refresh":
+		m.statusMsg = "Refreshing conversations..."
+		cmds = append(cmds, m.loadConversationsCmd())
+		if m.activeCascadeID != "" {
+			cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+		}
+	case "quit":
+		if m.streamCancelFunc != nil {
+			m.streamCancelFunc()
+		}
+		return tea.Quit
+	}
+	return tea.Batch(cmds...)
 }

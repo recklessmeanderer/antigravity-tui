@@ -53,6 +53,9 @@ antigravity-tui
 | Keybinding | Action |
 | :--- | :--- |
 | `Tab` | Cycle focus between **Sidebar**, **Chat Input**, and **Chat History** |
+| `Ctrl+N` | **New Conversation**: Start a new chat session in the selected project |
+| `Ctrl+P` | **New Project**: Prompt for a new project name & create it |
+| `Ctrl+X` / `Delete` | **Delete**: Delete the selected conversation or project (with confirmation) |
 | `Mouse Wheel` | Scroll sidebar (left half) or chat transcript (right half) |
 | `PgUp` / `PgDn` | Scroll chat transcript up/down (works from Input or Chat pane) |
 | `r` | Refresh projects and conversation list |
@@ -65,6 +68,9 @@ antigravity-tui
 | `Enter` / `Space` | **On Project**: Toggle Expand / Collapse (`▶` / `▼`)<br>**On Conversation**: Open session & focus input |
 | `→` / `d` / `l` | Expand selected project folder / Open conversation |
 | `←` / `a` / `h` | Collapse selected project folder / Jump to parent project |
+| `n` | Create a new conversation in the selected project |
+| `p` | Create a new project |
+| `x` / `Delete` | Delete selected conversation or project |
 | **Mouse Click** | Click on any project to toggle expand/collapse, or click a conversation to load it |
 
 ### In Chat Transcript
@@ -79,7 +85,9 @@ antigravity-tui
 | Button | Action |
 | :--- | :--- |
 | `⇥ Tab: Pane` | Click to cycle focus (**Sidebar** ➔ **Input** ➔ **Chat**) |
-| `␣ Open/Expand` | Click to toggle selected project folder or load conversation |
-| `▲ PgUp` / `▼ PgDn` | Click to scroll conversation history up / down |
+| `␣ Open` | Click to toggle selected project folder or load conversation |
+| `+ Chat (Ctrl+N)` | Click to create a new conversation |
+| `+ Proj (Ctrl+P)` | Click to create a new project |
+| `🗑 Del (Ctrl+X)` | Click to delete selected conversation or project (prompts confirmation) |
 | `⟳ Refresh` | Click to fetch latest projects and conversation states |
-| `✕ Quit (Ctrl+C)` | Click to exit the application |
+| `✕ Quit (Ctrl+C)` | Click to exit the application cleanly |

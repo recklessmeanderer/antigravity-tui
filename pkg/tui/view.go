@@ -100,32 +100,7 @@ func (m Model) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, " ", rightPane)
 
 	// 5. Bottom Clickable Button Statusline
-	// We render interactive buttons with clear boundaries
-	tabBtn := btnStyle.Render("⇥ Tab: Pane")
-	if m.focusedPane == FocusSidebar {
-		tabBtn = btnActiveStyle.Render("⇥ Sidebar")
-	} else if m.focusedPane == FocusChat {
-		tabBtn = btnActiveStyle.Render("⇥ Chat")
-	} else if m.focusedPane == FocusInput {
-		tabBtn = btnActiveStyle.Render("⇥ Input")
-	}
-
-	openBtn := btnStyle.Render("␣ Open/Expand")
-	pgUpBtn := btnStyle.Render("▲ PgUp")
-	pgDnBtn := btnStyle.Render("▼ PgDn")
-	refreshBtn := btnStyle.Render("⟳ Refresh")
-	quitBtn := btnQuitStyle.Render("✕ Quit (Ctrl+C)")
-
-	buttonBar := lipgloss.JoinHorizontal(lipgloss.Center,
-		tabBtn, " ",
-		openBtn, " ",
-		pgUpBtn, " ",
-		pgDnBtn, " ",
-		refreshBtn, " ",
-		quitBtn, " ",
-		lipgloss.NewStyle().Foreground(subduedColor).Render(" [WASD/Arrows to navigate]"),
-	)
-
+	buttonBar, _ := m.renderButtonBar()
 	statusline := statusBarStyle.Width(m.width).Render(buttonBar)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -133,6 +108,78 @@ func (m Model) View() string {
 		body,
 		statusline,
 	)
+}
+
+func (m Model) renderButtonBar() (string, []ButtonHitbox) {
+	if m.modalMode == ModalNewProject {
+		prompt := lipgloss.NewStyle().Bold(true).Foreground(accentColor).Render("📁 NEW PROJECT: ")
+		inputTxt := lipgloss.NewStyle().Background(surfaceColor).Foreground(textColor).Render(" " + m.modalInput + "█ ")
+		help := lipgloss.NewStyle().Foreground(subduedColor).Render(" [Press Enter to Create, Esc to Cancel]")
+		return prompt + inputTxt + help, nil
+	}
+
+	if m.modalMode == ModalConfirmDelete {
+		prompt := lipgloss.NewStyle().Bold(true).Foreground(errorColor).Render(m.statusMsg + " [Press 'y' to Confirm, 'n' or Esc to Cancel]")
+		return prompt, nil
+	}
+
+	var hitboxes []ButtonHitbox
+	var renderedBtns []string
+	currentX := 0
+
+	addBtn := func(id, text string, style lipgloss.Style) {
+		rendered := style.Render(text)
+		width := lipgloss.Width(rendered)
+		hitboxes = append(hitboxes, ButtonHitbox{
+			ID:   id,
+			MinX: currentX,
+			MaxX: currentX + width - 1,
+		})
+		renderedBtns = append(renderedBtns, rendered)
+		currentX += width + 1 // + 1 for separator space
+	}
+
+	// 1. Tab / Pane Button
+	tabText := "⇥ Pane"
+	tStyle := btnStyle
+	if m.focusedPane == FocusSidebar {
+		tabText = "⇥ Sidebar"
+		tStyle = btnActiveStyle
+	} else if m.focusedPane == FocusChat {
+		tabText = "⇥ Chat"
+		tStyle = btnActiveStyle
+	} else if m.focusedPane == FocusInput {
+		tabText = "⇥ Input"
+		tStyle = btnActiveStyle
+	}
+	addBtn("tab", tabText, tStyle)
+
+	// 2. Open / Expand Button
+	addBtn("open", "␣ Open", btnStyle)
+
+	// 3. New Chat Button
+	addBtn("new_chat", "+ Chat (Ctrl+N)", btnStyle)
+
+	// 4. New Project Button
+	addBtn("new_proj", "+ Proj (Ctrl+P)", btnStyle)
+
+	// 5. Delete Button (Context-aware: Conversation vs Project)
+	delLabel := "🗑 Del (Ctrl+X)"
+	if len(m.visibleNodes) > 0 && m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+		if m.visibleNodes[m.selectedNodeIdx].IsHeader {
+			delLabel = "🗑 Del Proj (Ctrl+X)"
+		}
+	}
+	addBtn("del", delLabel, btnDangerStyle)
+
+	// 6. Refresh Button
+	addBtn("refresh", "⟳ Refresh", btnStyle)
+
+	// 7. Quit Button
+	addBtn("quit", "✕ Quit (Ctrl+C)", btnQuitStyle)
+
+	buttonBar := strings.Join(renderedBtns, " ")
+	return buttonBar, hitboxes
 }
 
 func (m Model) renderSidebar(width int) string {

@@ -141,4 +141,10 @@ var (
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#E53E3E")).
 			Padding(0, 1)
+
+	btnDangerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#9B2C2C")).
+			Padding(0, 1)
 )

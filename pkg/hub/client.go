@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -474,4 +476,33 @@ func (c *Client) StreamAgentStateUpdates(ctx context.Context, cascadeID, subscri
 		req,
 		onData,
 	)
+}
+
+// DeleteCascade deletes a conversation trajectory by cascade ID and clears local logs.
+func (c *Client) DeleteCascade(ctx context.Context, cascadeID string) error {
+	var resp json.RawMessage
+	err := c.UnaryCall(
+		ctx,
+		"/exa.language_server_pb.LanguageServerService/DeleteCascadeTrajectory",
+		map[string]string{"cascadeId": cascadeID},
+		&resp,
+	)
+	if err != nil {
+		return err
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		brainDir := filepath.Join(home, ".gemini", "antigravity", "brain", cascadeID)
+		_ = os.RemoveAll(brainDir)
+	}
+	return nil
+}
+
+// NewUUID generates a standard RFC 4122 v4 UUID string.
+func NewUUID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
