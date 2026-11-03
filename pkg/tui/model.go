@@ -208,7 +208,7 @@ func (m *Model) rebuildTree() {
 
 	// Keep sidebar scroll in view
 	bodyHeight := m.height - 2
-	maxVisible := bodyHeight - 4
+	maxVisible := bodyHeight - 5
 	if maxVisible < 1 {
 		maxVisible = 1
 	}

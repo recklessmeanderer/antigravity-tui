@@ -147,7 +147,7 @@ func (m Model) renderSidebar(width int) string {
 	}
 
 	bodyHeight := m.height - 2
-	maxVisible := bodyHeight - 4
+	maxVisible := bodyHeight - 5
 	if maxVisible < 1 {
 		maxVisible = 1
 	}
