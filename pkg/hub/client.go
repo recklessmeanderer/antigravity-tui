@@ -416,6 +416,12 @@ func (c *Client) GetAllTrajectories(ctx context.Context) (map[string]TrajectoryS
 
 // GetTrajectorySteps fetches full message history, thoughts, and tool executions for a conversation.
 func (c *Client) GetTrajectorySteps(ctx context.Context, cascadeID string) ([]Step, error) {
+	// 1. Try reading live transcript from local brain logs first (always has real-time latest turns)
+	if diskSteps, err := LoadTranscriptFromDisk(cascadeID); err == nil && len(diskSteps) > 0 {
+		return diskSteps, nil
+	}
+
+	// 2. Fallback to Language Server RPC
 	var resp GetCascadeTrajectoryStepsPayload
 	err := c.UnaryCall(
 		ctx,
