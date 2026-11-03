@@ -207,7 +207,7 @@ func (m *Model) rebuildTree() {
 	}
 
 	// Keep sidebar scroll in view
-	maxVisible := m.height - 5
+	maxVisible := m.height - 6
 	if maxVisible < 1 {
 		maxVisible = 1
 	}
@@ -223,11 +223,28 @@ func (m *Model) rebuildTree() {
 	}
 }
 
+func (m *Model) cyclePaneFocus() {
+	switch m.focusedPane {
+	case FocusSidebar:
+		m.focusedPane = FocusInput
+		m.input.Focus()
+	case FocusInput:
+		m.focusedPane = FocusChat
+		m.input.Blur()
+	case FocusChat:
+		m.focusedPane = FocusSidebar
+		m.input.Blur()
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		cmd  tea.Cmd
 		cmds []tea.Cmd
 	)
+
+	sidebarWidth := 36
+	inputHeight := 4
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -236,28 +253,114 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalculateLayout()
 
 	case tea.MouseMsg:
-		sidebarWidth := 36
 		switch msg.Type {
 		case tea.MouseWheelUp:
 			if msg.X < sidebarWidth {
-				// Scroll sidebar up
 				if m.sidebarOffset > 0 {
 					m.sidebarOffset--
 				}
 			} else {
-				// Scroll chat transcript up
 				m.viewport.LineUp(3)
 			}
+
 		case tea.MouseWheelDown:
 			if msg.X < sidebarWidth {
-				// Scroll sidebar down
-				maxVisible := m.height - 5
+				maxVisible := m.height - 6
 				if m.sidebarOffset+maxVisible < len(m.visibleNodes) {
 					m.sidebarOffset++
 				}
 			} else {
-				// Scroll chat transcript down
 				m.viewport.LineDown(3)
+			}
+
+		case tea.MouseLeft:
+			// 1. Click on bottom statusline bar buttons
+			if msg.Y >= m.height-1 {
+				// Widths of buttons in bottom statusline:
+				// [Tab: Pane] ~ 0..14
+				// [↵ Open/Expand] ~ 15..32
+				// [▲ PgUp] ~ 33..43
+				// [▼ PgDn] ~ 44..54
+				// [⟳ Refresh] ~ 55..68
+				// [✕ Quit] ~ 69..79
+				switch {
+				case msg.X >= 0 && msg.X <= 14:
+					m.cyclePaneFocus()
+					return m, nil
+				case msg.X >= 15 && msg.X <= 32:
+					// Open or expand current selection
+					if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+						node := m.visibleNodes[m.selectedNodeIdx]
+						if node.IsHeader {
+							m.expandedState[node.ProjectName] = !m.expandedState[node.ProjectName]
+							m.rebuildTree()
+						} else if node.Conversation != nil {
+							m.activeCascadeID = node.Conversation.CascadeID
+							cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
+							m.focusedPane = FocusInput
+							m.input.Focus()
+						}
+					}
+					return m, tea.Batch(cmds...)
+				case msg.X >= 33 && msg.X <= 43:
+					m.viewport.HalfViewUp()
+					return m, nil
+				case msg.X >= 44 && msg.X <= 54:
+					m.viewport.HalfViewDown()
+					return m, nil
+				case msg.X >= 55 && msg.X <= 68:
+					m.statusMsg = "Refreshing conversations..."
+					cmds = append(cmds, m.loadConversationsCmd())
+					if m.activeCascadeID != "" {
+						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+					}
+					return m, tea.Batch(cmds...)
+				case msg.X >= 69 && msg.X <= 82:
+					if m.streamCancelFunc != nil {
+						m.streamCancelFunc()
+					}
+					return m, tea.Quit
+				}
+			}
+
+			// 2. Click in Sidebar area
+			if msg.X < sidebarWidth && msg.Y >= 1 && msg.Y < m.height-1 {
+				m.focusedPane = FocusSidebar
+				m.input.Blur()
+
+				// Click directly on a node row
+				// Row 1 is header, row 2 is "PROJECTS (N)", row 3 is scroll indicator / margin
+				if msg.Y >= 3 {
+					nodeIdx := m.sidebarOffset + (msg.Y - 3)
+					if nodeIdx >= 0 && nodeIdx < len(m.visibleNodes) {
+						m.selectedNodeIdx = nodeIdx
+						node := m.visibleNodes[nodeIdx]
+						if node.IsHeader {
+							m.expandedState[node.ProjectName] = !m.expandedState[node.ProjectName]
+							m.rebuildTree()
+						} else if node.Conversation != nil {
+							m.activeCascadeID = node.Conversation.CascadeID
+							cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
+							m.focusedPane = FocusInput
+							m.input.Focus()
+						}
+					}
+				}
+				return m, tea.Batch(cmds...)
+			}
+
+			// 3. Click in Right pane area
+			if msg.X >= sidebarWidth && msg.Y >= 1 && msg.Y < m.height-1 {
+				if msg.Y >= m.height-inputHeight-1 {
+					// Clicked on Input box
+					m.focusedPane = FocusInput
+					m.input.Focus()
+				} else {
+					// Clicked on Chat transcript
+					m.focusedPane = FocusChat
+					m.input.Blur()
+				}
+				return m, nil
 			}
 		}
 
@@ -278,7 +381,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = fmt.Sprintf("Connected (Port %d, %d projects, %d sessions)",
 			m.hubInfo.HttpPort, len(m.projectGroups), len(m.conversations))
 
-		// If no conversation currently loaded, select the first conversation available
 		if m.activeCascadeID == "" && len(m.conversations) > 0 {
 			m.activeCascadeID = m.conversations[0].CascadeID
 			cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
@@ -304,18 +406,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "tab":
-			// Cycle pane focus: Sidebar -> Input -> Chat -> Sidebar
-			switch m.focusedPane {
-			case FocusSidebar:
-				m.focusedPane = FocusInput
-				m.input.Focus()
-			case FocusInput:
-				m.focusedPane = FocusChat
-				m.input.Blur()
-			case FocusChat:
-				m.focusedPane = FocusSidebar
-				m.input.Blur()
-			}
+			m.cyclePaneFocus()
 			return m, nil
 
 		case "esc":
@@ -341,12 +432,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.focusedPane {
 		case FocusSidebar:
 			switch msg.String() {
-			case "up", "k":
+			// WASD + Arrow Keys + Vim keys for navigation
+			case "up", "k", "w", "W":
 				if m.selectedNodeIdx > 0 {
 					m.selectedNodeIdx--
 					m.rebuildTree()
 				}
-			case "down", "j":
+			case "down", "j", "s", "S":
 				if m.selectedNodeIdx < len(m.visibleNodes)-1 {
 					m.selectedNodeIdx++
 					m.rebuildTree()
@@ -355,26 +447,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
 					node := m.visibleNodes[m.selectedNodeIdx]
 					if node.IsHeader {
-						// Toggle project collapse / expand
 						m.expandedState[node.ProjectName] = !m.expandedState[node.ProjectName]
 						m.rebuildTree()
 					} else if node.Conversation != nil {
-						// Select conversation and load
 						m.activeCascadeID = node.Conversation.CascadeID
 						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 						m.focusedPane = FocusInput
 						m.input.Focus()
 					}
 				}
-			case "right", "l":
+			case "right", "l", "d", "D":
 				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
 					node := m.visibleNodes[m.selectedNodeIdx]
-					if node.IsHeader && !m.expandedState[node.ProjectName] {
-						m.expandedState[node.ProjectName] = true
-						m.rebuildTree()
+					if node.IsHeader {
+						if !m.expandedState[node.ProjectName] {
+							m.expandedState[node.ProjectName] = true
+							m.rebuildTree()
+						}
+					} else if node.Conversation != nil {
+						m.activeCascadeID = node.Conversation.CascadeID
+						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
+						m.focusedPane = FocusInput
+						m.input.Focus()
 					}
 				}
-			case "left", "h":
+			case "left", "h", "a", "A":
 				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
 					node := m.visibleNodes[m.selectedNodeIdx]
 					if node.IsHeader && m.expandedState[node.ProjectName] {
@@ -416,7 +513,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			// Handle Ctrl+U / Ctrl+D for scrolling transcript from input
 			if msg.String() == "ctrl+u" {
 				m.viewport.HalfViewUp()
 				return m, nil

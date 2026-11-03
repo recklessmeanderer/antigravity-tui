@@ -118,13 +118,27 @@ var (
 				Background(lipgloss.Color("#1E1E24")).
 				Padding(0, 1)
 
-	// Footer Help Style
+	// Footer Help & Clickable Button Styles
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(subduedColor).
 			Background(surfaceColor).
 			Padding(0, 1)
 
-	keybindStyle = lipgloss.NewStyle().
+	btnStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(textColor)
+			Foreground(lipgloss.Color("#F7FAFC")).
+			Background(lipgloss.Color("#2D3748")).
+			Padding(0, 1)
+
+	btnActiveStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#16161A")).
+			Background(accentColor).
+			Padding(0, 1)
+
+	btnQuitStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#E53E3E")).
+			Padding(0, 1)
 )

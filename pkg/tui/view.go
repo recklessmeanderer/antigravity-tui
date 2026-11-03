@@ -91,15 +91,34 @@ func (m Model) View() string {
 	// 4. Main Body Split
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, " ", rightPane)
 
-	// 5. Bottom Statusline
-	statusline := statusBarStyle.Width(m.width).Render(
-		keybindStyle.Render("[Tab]") + " Pane  " +
-			keybindStyle.Render("[Enter/Space]") + " Expand/Open  " +
-			keybindStyle.Render("[PgUp/PgDn / MouseWheel]") + " Scroll  " +
-			keybindStyle.Render("[r]") + " Refresh  " +
-			keybindStyle.Render("[Esc]") + " Stop/Back  " +
-			keybindStyle.Render("[Ctrl+C]") + " Quit",
+	// 5. Bottom Clickable Button Statusline
+	// We render interactive buttons with clear boundaries
+	tabBtn := btnStyle.Render("⇥ Tab: Pane")
+	if m.focusedPane == FocusSidebar {
+		tabBtn = btnActiveStyle.Render("⇥ Sidebar")
+	} else if m.focusedPane == FocusChat {
+		tabBtn = btnActiveStyle.Render("⇥ Chat")
+	} else if m.focusedPane == FocusInput {
+		tabBtn = btnActiveStyle.Render("⇥ Input")
+	}
+
+	openBtn := btnStyle.Render("↵ Open/Expand")
+	pgUpBtn := btnStyle.Render("▲ PgUp")
+	pgDnBtn := btnStyle.Render("▼ PgDn")
+	refreshBtn := btnStyle.Render("⟳ Refresh")
+	quitBtn := btnQuitStyle.Render("✕ Quit")
+
+	buttonBar := lipgloss.JoinHorizontal(lipgloss.Center,
+		tabBtn, " ",
+		openBtn, " ",
+		pgUpBtn, " ",
+		pgDnBtn, " ",
+		refreshBtn, " ",
+		quitBtn, " ",
+		lipgloss.NewStyle().Foreground(subduedColor).Render(" [WASD/Arrows to navigate]"),
 	)
+
+	statusline := statusBarStyle.Width(m.width).Render(buttonBar)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		headerLine,
