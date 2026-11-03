@@ -27,6 +27,14 @@ func (m Model) View() string {
 	headerLine := lipgloss.JoinHorizontal(lipgloss.Center, title, " ", connBadge, " ", hubPID, "  ", statusText)
 
 	// 2. Sidebar View
+	bodyHeight := m.height - 2
+	if bodyHeight < 3 {
+		bodyHeight = 3
+	}
+	sbHeight := bodyHeight - 2
+	if sbHeight < 1 {
+		sbHeight = 1
+	}
 	sidebarContent := m.renderSidebar(sidebarWidth)
 	sbStyle := paneStyle
 	if m.focusedPane == FocusSidebar {
@@ -34,7 +42,7 @@ func (m Model) View() string {
 	}
 	sidebarView := sbStyle.
 		Width(sidebarWidth).
-		Height(m.height - 4).
+		Height(sbHeight).
 		Render(sidebarContent)
 
 	// 3. Right Pane (Chat Viewport + Input Box)
@@ -138,9 +146,10 @@ func (m Model) renderSidebar(width int) string {
 		return b.String()
 	}
 
-	maxVisible := m.height - 7
-	if maxVisible < 3 {
-		maxVisible = 3
+	bodyHeight := m.height - 2
+	maxVisible := bodyHeight - 4
+	if maxVisible < 1 {
+		maxVisible = 1
 	}
 
 	start := m.sidebarOffset

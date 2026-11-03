@@ -207,7 +207,8 @@ func (m *Model) rebuildTree() {
 	}
 
 	// Keep sidebar scroll in view
-	maxVisible := m.height - 6
+	bodyHeight := m.height - 2
+	maxVisible := bodyHeight - 4
 	if maxVisible < 1 {
 		maxVisible = 1
 	}
@@ -244,7 +245,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	)
 
 	sidebarWidth := 36
-	inputHeight := 4
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -364,7 +364,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// 3. Click in Right pane area
 			if msg.X >= sidebarWidth && msg.Y >= 1 && msg.Y < m.height-1 {
-				if msg.Y >= m.height-inputHeight-1 {
+				inViewHeight := m.input.Height() + 2
+				if msg.Y >= m.height-inViewHeight-1 {
 					// Clicked on Input box
 					m.focusedPane = FocusInput
 					m.input.Focus()
@@ -584,10 +585,27 @@ func (m *Model) recalculateLayout() {
 		contentWidth = 40
 	}
 
-	inputHeight := 4
-	viewportHeight := m.height - inputHeight - 5
-	if viewportHeight < 5 {
-		viewportHeight = 5
+	// Dynamic input box height based on terminal height:
+	// Height < 16: 1 line (total inView = 3 lines with borders)
+	// Height < 24: 2 lines (total inView = 4 lines with borders)
+	// Height >= 24: 3 lines (total inView = 5 lines with borders)
+	inputHeight := 3
+	switch {
+	case m.height < 16:
+		inputHeight = 1
+	case m.height < 24:
+		inputHeight = 2
+	default:
+		inputHeight = 3
+	}
+	m.input.SetHeight(inputHeight)
+
+	bodyHeight := m.height - 2
+	inViewHeight := inputHeight + 2
+	// rightPane total = 1 (chatHeader) + (viewportHeight + 2) + inViewHeight == bodyHeight
+	viewportHeight := bodyHeight - 1 - inViewHeight - 2
+	if viewportHeight < 1 {
+		viewportHeight = 1
 	}
 
 	m.viewport.Width = contentWidth - 4
