@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -295,6 +296,107 @@ func (c *Client) cancelStream(streamID string) {
 	c.streamsMu.Lock()
 	delete(c.streams, streamID)
 	c.streamsMu.Unlock()
+}
+
+// ConversationItem represents a unified conversation for display in the UI.
+type ConversationItem struct {
+	CascadeID        string
+	Title            string
+	Snippet          string
+	WorkspaceName    string
+	StepCount        int
+	Status           string
+	LastModifiedTime string
+}
+
+// SearchConversations queries the conversation index across all workspaces.
+func (c *Client) SearchConversations(ctx context.Context, query string, limit int) ([]ConversationSearchResult, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	req := map[string]any{
+		"query": query,
+		"limit": limit,
+	}
+	var resp SearchConversationsPayload
+	err := c.UnaryCall(
+		ctx,
+		"/exa.language_server_pb.LanguageServerService/SearchConversations",
+		req,
+		&resp,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Results, nil
+}
+
+// ListAllConversations returns all historical and active conversations, merged and sorted newest first.
+func (c *Client) ListAllConversations(ctx context.Context) ([]ConversationItem, error) {
+	// 1. Fetch from search index
+	searchResults, err := c.SearchConversations(ctx, "", 150)
+	if err != nil {
+		// Fallback to active trajectories if search fails
+		searchResults = nil
+	}
+
+	// 2. Fetch active in-memory trajectories
+	activeTrajs, _ := c.GetAllTrajectories(ctx)
+
+	itemMap := make(map[string]*ConversationItem)
+
+	for _, r := range searchResults {
+		title := r.Title
+		if title == "" {
+			title = r.CascadeID
+		}
+		itemMap[r.CascadeID] = &ConversationItem{
+			CascadeID:        r.CascadeID,
+			Title:            title,
+			Snippet:          r.Snippet,
+			WorkspaceName:    r.WorkspaceName,
+			Status:           "IDLE",
+			LastModifiedTime: r.LastModifiedTime,
+		}
+	}
+
+	for id, t := range activeTrajs {
+		item, exists := itemMap[id]
+		if !exists {
+			title := t.Summary
+			if t.Annotations != nil && t.Annotations.Title != "" {
+				title = t.Annotations.Title
+			}
+			if title == "" {
+				title = id
+			}
+			item = &ConversationItem{
+				CascadeID:        id,
+				Title:            title,
+				LastModifiedTime: t.LastModifiedTime,
+			}
+			itemMap[id] = item
+		}
+		item.StepCount = t.StepCount
+		if t.Status != "" {
+			item.Status = t.Status
+		}
+		if t.LastModifiedTime > item.LastModifiedTime {
+			item.LastModifiedTime = t.LastModifiedTime
+		}
+	}
+
+	var list []ConversationItem
+	for _, it := range itemMap {
+		list = append(list, *it)
+	}
+
+	// Sort newest first
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].LastModifiedTime > list[j].LastModifiedTime
+	})
+
+	return list, nil
 }
 
 // GetAllTrajectories returns all conversation trajectories tracked by the language server.

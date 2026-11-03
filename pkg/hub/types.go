@@ -42,6 +42,19 @@ type GetAllTrajectoriesPayload struct {
 	TrajectorySummaries map[string]TrajectorySummary `json:"trajectorySummaries"`
 }
 
+type ConversationSearchResult struct {
+	CascadeID        string `json:"cascadeId"`
+	Title            string `json:"title"`
+	WorkspaceName    string `json:"workspaceName"`
+	Snippet          string `json:"snippet"`
+	LastModifiedTime string `json:"lastModifiedTime"`
+	NeedsAttention   bool   `json:"needsAttention"`
+}
+
+type SearchConversationsPayload struct {
+	Results []ConversationSearchResult `json:"results"`
+}
+
 // Step represents a step in an Antigravity conversation trajectory.
 type Step struct {
 	Type            string           `json:"type"`
@@ -49,6 +62,7 @@ type Step struct {
 	UserInput       *UserInput       `json:"userInput,omitempty"`
 	PlannerResponse *PlannerResponse `json:"plannerResponse,omitempty"`
 	RunCommand      *RunCommandStep  `json:"runCommand,omitempty"`
+	Generic         *GenericStep     `json:"generic,omitempty"`
 }
 
 type UserInput struct {
@@ -62,6 +76,7 @@ type UserInputItem struct {
 
 type PlannerResponse struct {
 	Thinking  string     `json:"thinking"`
+	Response  string     `json:"response"`
 	MessageID string     `json:"messageId"`
 	ToolCalls []ToolCall `json:"toolCalls"`
 }
@@ -76,6 +91,10 @@ type RunCommandStep struct {
 	CommandLine string `json:"commandLine"`
 	Output      string `json:"output"`
 	ExitCode    int    `json:"exitCode"`
+}
+
+type GenericStep struct {
+	Content string `json:"content"`
 }
 
 type GetCascadeTrajectoryStepsPayload struct {

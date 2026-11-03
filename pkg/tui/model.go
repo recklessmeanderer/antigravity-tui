@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -25,15 +24,10 @@ const (
 	FocusChat
 )
 
-type trajectoryItem struct {
-	CascadeID string
-	Summary   hub.TrajectorySummary
-}
-
 type Model struct {
 	client           *hub.Client
 	hubInfo          *hub.HubInfo
-	trajectories     []trajectoryItem
+	conversations    []hub.ConversationItem
 	selectedIdx      int
 	activeCascadeID  string
 	steps            []hub.Step
@@ -51,17 +45,13 @@ type Model struct {
 }
 
 // Msg types
-type trajectoriesLoadedMsg struct {
-	items []trajectoryItem
+type conversationsLoadedMsg struct {
+	items []hub.ConversationItem
 }
 
 type stepsLoadedMsg struct {
 	cascadeID string
 	steps     []hub.Step
-}
-
-type streamUpdateMsg struct {
-	payload json.RawMessage
 }
 
 type errMsg struct {
@@ -75,75 +65,65 @@ func NewModel(client *hub.Client, hubInfo *hub.HubInfo) Model {
 	ta.Placeholder = "Type a message or instruction to the agent... (Enter to send, Shift+Enter for newline)"
 	ta.Focus()
 	ta.Prompt = "❯ "
-	ta.CharLimit = 8000
+	ta.CharLimit = 16000
 	ta.SetWidth(80)
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
 
 	vp := viewport.New(80, 20)
-	vp.SetContent("Loading conversation...")
+	vp.SetContent("Connecting and loading conversations...")
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(primaryColor)
 
 	return Model{
-		client:       client,
-		hubInfo:      hubInfo,
-		trajectories: nil,
-		selectedIdx:  0,
-		viewport:     vp,
-		input:        ta,
-		spinner:      sp,
-		focusedPane:  FocusInput,
-		statusMsg:    "Connecting to Antigravity Hub...",
-		lastUpdate:   time.Now(),
+		client:        client,
+		hubInfo:       hubInfo,
+		conversations: nil,
+		selectedIdx:   0,
+		viewport:      vp,
+		input:         ta,
+		spinner:       sp,
+		focusedPane:   FocusInput,
+		statusMsg:     "Connected to Antigravity Hub",
+		lastUpdate:    time.Now(),
 	}
 }
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
-		m.loadTrajectoriesCmd(),
+		m.loadConversationsCmd(),
 		m.periodicTickCmd(),
 	)
 }
 
 func (m Model) periodicTickCmd() tea.Cmd {
-	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 		return periodicTickMsg(t)
 	})
 }
 
-func (m Model) loadTrajectoriesCmd() tea.Cmd {
+func (m Model) loadConversationsCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		trajs, err := m.client.GetAllTrajectories(ctx)
+		items, err := m.client.ListAllConversations(ctx)
 		if err != nil {
 			return errMsg{err: err}
 		}
 
-		var items []trajectoryItem
-		for id, summary := range trajs {
-			items = append(items, trajectoryItem{
-				CascadeID: id,
-				Summary:   summary,
-			})
-		}
-
-		// Sort by last modified time descending
-		sort.Slice(items, func(i, j int) bool {
-			return items[i].Summary.LastModifiedTime > items[j].Summary.LastModifiedTime
-		})
-
-		return trajectoriesLoadedMsg{items: items}
+		return conversationsLoadedMsg{items: items}
 	}
 }
 
 func (m Model) loadStepsCmd(cascadeID string) tea.Cmd {
 	return func() tea.Msg {
+		if cascadeID == "" {
+			return nil
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 
@@ -190,11 +170,10 @@ func (m *Model) startStreamingUpdates(cascadeID string) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		// Start stream in background
 		ctx := context.Background()
 		subID := fmt.Sprintf("tui-%d", time.Now().UnixNano())
 		cancelFn, err := m.client.StreamAgentStateUpdates(ctx, cascadeID, subID, func(raw json.RawMessage) {
-			// Trigger state update
+			// Streaming update callback
 		})
 		if err != nil {
 			return errMsg{err: err}
@@ -223,16 +202,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, spCmd)
 
 	case periodicTickMsg:
-		cmds = append(cmds, m.loadTrajectoriesCmd(), m.periodicTickCmd())
+		cmds = append(cmds, m.loadConversationsCmd(), m.periodicTickCmd())
 		if m.activeCascadeID != "" {
 			cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
 		}
 
-	case trajectoriesLoadedMsg:
-		m.trajectories = msg.items
-		m.statusMsg = fmt.Sprintf("Connected (Port %d, %d sessions)", m.hubInfo.HttpPort, len(m.trajectories))
-		if len(m.trajectories) > 0 && m.activeCascadeID == "" {
-			m.activeCascadeID = m.trajectories[0].CascadeID
+	case conversationsLoadedMsg:
+		m.conversations = msg.items
+		m.statusMsg = fmt.Sprintf("Connected (Port %d, %d sessions)", m.hubInfo.HttpPort, len(m.conversations))
+		if len(m.conversations) > 0 && m.activeCascadeID == "" {
+			m.activeCascadeID = m.conversations[0].CascadeID
 			m.selectedIdx = 0
 			cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 		}
@@ -282,14 +261,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "r":
-			if m.focusedPane == FocusSidebar {
-				m.statusMsg = "Refreshing sessions..."
-				cmds = append(cmds, m.loadTrajectoriesCmd())
-				if m.activeCascadeID != "" {
-					cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
-				}
-				return m, tea.Batch(cmds...)
+			m.statusMsg = "Refreshing conversations..."
+			cmds = append(cmds, m.loadConversationsCmd())
+			if m.activeCascadeID != "" {
+				cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
 			}
+			return m, tea.Batch(cmds...)
 		}
 
 		// Pane specific handling
@@ -299,13 +276,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "up", "k":
 				if m.selectedIdx > 0 {
 					m.selectedIdx--
-					m.activeCascadeID = m.trajectories[m.selectedIdx].CascadeID
+					m.activeCascadeID = m.conversations[m.selectedIdx].CascadeID
 					cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 				}
 			case "down", "j":
-				if m.selectedIdx < len(m.trajectories)-1 {
+				if m.selectedIdx < len(m.conversations)-1 {
 					m.selectedIdx++
-					m.activeCascadeID = m.trajectories[m.selectedIdx].CascadeID
+					m.activeCascadeID = m.conversations[m.selectedIdx].CascadeID
 					cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID), m.startStreamingUpdates(m.activeCascadeID))
 				}
 			case "enter":
@@ -320,10 +297,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.Reset()
 					m.statusMsg = "Sent message to agent..."
 					cmds = append(cmds, m.sendMessageCmd(text))
-					// Trigger immediate reload
-					time.AfterFunc(500*time.Millisecond, func() {
-						// refresh will happen on next tick
-					})
+					if m.activeCascadeID != "" {
+						cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+					}
 				}
 				return m, tea.Batch(cmds...)
 			}
@@ -344,7 +320,7 @@ func (m *Model) recalculateLayout() {
 		return
 	}
 
-	sidebarWidth := 34
+	sidebarWidth := 36
 	contentWidth := m.width - sidebarWidth - 4
 	if contentWidth < 40 {
 		contentWidth = 40

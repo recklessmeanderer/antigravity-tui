@@ -21,13 +21,19 @@ func TestLiveHubConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	trajectories, err := client.GetAllTrajectories(ctx)
+	conversations, err := client.ListAllConversations(ctx)
 	if err != nil {
-		t.Fatalf("GetAllTrajectories failed: %v", err)
+		t.Fatalf("ListAllConversations failed: %v", err)
 	}
 
-	t.Logf("Live hub connected successfully! Found %d trajectories.", len(trajectories))
-	for id, sum := range trajectories {
-		t.Logf(" - Trajectory ID %s: %s (steps: %d, status: %s)", id, sum.Summary, sum.StepCount, sum.Status)
+	if len(conversations) == 0 {
+		t.Fatalf("Expected non-empty conversations list")
+	}
+
+	t.Logf("Live hub connected successfully! Found %d total conversations across workspaces.", len(conversations))
+	for i, c := range conversations {
+		if i < 5 {
+			t.Logf(" - [%d] ID: %s | Title: %s | Status: %s", i, c.CascadeID, c.Title, c.Status)
+		}
 	}
 }
