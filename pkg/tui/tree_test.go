@@ -31,7 +31,7 @@ func TestBuildProjectGroups(t *testing.T) {
 	expandedState := make(map[string]bool)
 
 	// Test 1: All collapsed by default
-	groups, nodes := BuildProjectGroups(convs, expandedState)
+	groups, nodes := BuildProjectGroupsWithProjects(convs, expandedState, nil)
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
@@ -46,7 +46,7 @@ func TestBuildProjectGroups(t *testing.T) {
 
 	// Test 2: Expand "antigravity-tui"
 	expandedState["antigravity-tui"] = true
-	_, nodes = BuildProjectGroups(convs, expandedState)
+	_, nodes = BuildProjectGroupsWithProjects(convs, expandedState, nil)
 	// 2 headers + 2 conversations under antigravity-tui = 4 nodes
 	if len(nodes) != 4 {
 		t.Fatalf("expected 4 visible nodes when one is expanded, got %d", len(nodes))
@@ -56,5 +56,24 @@ func TestBuildProjectGroups(t *testing.T) {
 	}
 	if nodes[2].IsHeader || nodes[2].Conversation.CascadeID != "c2" {
 		t.Errorf("expected node 2 to be conversation c2 (newest), got %+v", nodes[2])
+	}
+
+	// Test 3: Known projects included even with zero conversations
+	knownProjects := []string{"investments", "oscillopulse", "antigravity-tui"}
+	groups3, _ := BuildProjectGroupsWithProjects(convs, expandedState, knownProjects)
+	if len(groups3) != 3 {
+		t.Fatalf("expected 3 groups including investments, got %d", len(groups3))
+	}
+	foundInvestments := false
+	for _, g := range groups3 {
+		if g.Name == "investments" {
+			foundInvestments = true
+			if len(g.Conversations) != 0 {
+				t.Errorf("expected 0 conversations for investments, got %d", len(g.Conversations))
+			}
+		}
+	}
+	if !foundInvestments {
+		t.Errorf("expected investments group to be present in groups3")
 	}
 }

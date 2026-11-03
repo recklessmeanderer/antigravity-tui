@@ -25,7 +25,24 @@ type SidebarNode struct {
 // BuildProjectGroups groups conversations by project, applies collapse/expand state,
 // and flattens visible items into a navigable list of SidebarNodes.
 func BuildProjectGroups(conversations []hub.ConversationItem, expandedState map[string]bool) ([]*ProjectGroup, []SidebarNode) {
+	return BuildProjectGroupsWithProjects(conversations, expandedState, hub.LoadAllProjectNames())
+}
+
+// BuildProjectGroupsWithProjects allows injecting known project names.
+func BuildProjectGroupsWithProjects(conversations []hub.ConversationItem, expandedState map[string]bool, knownProjects []string) ([]*ProjectGroup, []SidebarNode) {
 	groupMap := make(map[string]*ProjectGroup)
+
+	// Pre-populate known projects from configuration
+	for _, projName := range knownProjects {
+		isExpanded := false
+		if val, ok := expandedState[projName]; ok {
+			isExpanded = val
+		}
+		groupMap[projName] = &ProjectGroup{
+			Name:     projName,
+			Expanded: isExpanded,
+		}
+	}
 
 	for _, conv := range conversations {
 		projName := strings.TrimSpace(conv.WorkspaceName)
@@ -69,6 +86,9 @@ func BuildProjectGroups(conversations []hub.ConversationItem, expandedState map[
 	}
 
 	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].NewestTime == groups[j].NewestTime {
+			return groups[i].Name < groups[j].Name
+		}
 		return groups[i].NewestTime > groups[j].NewestTime
 	})
 

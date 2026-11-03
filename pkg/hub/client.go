@@ -398,8 +398,17 @@ func (c *Client) ListAllConversations(ctx context.Context) ([]ConversationItem, 
 		}
 	}
 
+	// Map project IDs to human-readable project names (e.g. 4662a52d... -> "investments")
+	projectMap := LoadProjectMap()
+	convProjectMap := LoadConversationProjectIDs()
+
 	var list []ConversationItem
 	for _, it := range itemMap {
+		if pid, ok := convProjectMap[it.CascadeID]; ok && pid != "" {
+			if pname, exists := projectMap[pid]; exists && pname != "" {
+				it.WorkspaceName = pname
+			}
+		}
 		list = append(list, *it)
 	}
 
