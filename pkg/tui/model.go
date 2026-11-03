@@ -402,6 +402,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.deletedCascadeIDs[item.CascadeID] {
 				continue
 			}
+			// If hub returned raw UUID or empty title, preserve existing human-readable title
+			if item.Title == "" || item.Title == item.CascadeID {
+				for _, existing := range m.conversations {
+					if existing.CascadeID == item.CascadeID && existing.Title != "" && existing.Title != item.CascadeID && existing.Title != "New Conversation" {
+						item.Title = existing.Title
+						break
+					}
+				}
+			}
 			merged = append(merged, item)
 			seen[item.CascadeID] = true
 		}
@@ -428,6 +437,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stepsLoadedMsg:
 		if msg.cascadeID == m.activeCascadeID {
 			m.steps = msg.steps
+
+			// Derive title from first user message if current title is default or raw UUID
+			for _, step := range m.steps {
+				if step.Type == "CORTEX_STEP_TYPE_USER_INPUT" && step.UserInput != nil {
+					userText := step.UserInput.UserResponse
+					if userText == "" && len(step.UserInput.Items) > 0 {
+						userText = step.UserInput.Items[0].Text
+					}
+					userText = strings.TrimSpace(userText)
+					if userText != "" {
+						firstLine := strings.Split(userText, "\n")[0]
+						firstLine = strings.TrimSpace(firstLine)
+						if len(firstLine) > 35 {
+							firstLine = firstLine[:32] + "..."
+						}
+						for i := range m.conversations {
+							if m.conversations[i].CascadeID == msg.cascadeID {
+								currTitle := m.conversations[i].Title
+								if currTitle == "" || currTitle == "New Conversation" || currTitle == msg.cascadeID || len(currTitle) == 36 {
+									m.conversations[i].Title = firstLine
+									if conv, ok := m.createdConversations[msg.cascadeID]; ok {
+										conv.Title = firstLine
+										m.createdConversations[msg.cascadeID] = conv
+									}
+									m.rebuildTree()
+								}
+								break
+							}
+						}
+						break
+					}
+				}
+			}
+
 			if len(m.steps) == 0 && m.createdConversations != nil && m.createdConversations[msg.cascadeID].CascadeID != "" {
 				conv := m.createdConversations[msg.cascadeID]
 				m.viewport.SetContent(lipgloss.NewStyle().Foreground(subduedColor).Render(
@@ -547,7 +590,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.startNewProjectPrompt()
 			return m, nil
 
-		case "ctrl+d", "ctrl+x", "delete":
+		case "ctrl+d", "ctrl+x":
 			m.startDeleteChatPrompt()
 			return m, nil
 
@@ -569,7 +612,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "r":
+		case "ctrl+r":
 			m.statusMsg = "Refreshing conversations..."
 			cmds = append(cmds, m.loadConversationsCmd())
 			if m.activeCascadeID != "" {
@@ -648,6 +691,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "p":
 				m.startNewProjectPrompt()
 				return m, nil
+			case "r":
+				m.statusMsg = "Refreshing conversations..."
+				cmds = append(cmds, m.loadConversationsCmd())
+				if m.activeCascadeID != "" {
+					cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+				}
+				return m, tea.Batch(cmds...)
+			case "delete":
+				m.startDeleteChatPrompt()
+				return m, nil
 			case "x":
 				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) && m.visibleNodes[m.selectedNodeIdx].IsHeader {
 					m.startDeleteProjPrompt()
@@ -672,17 +725,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.input.Reset()
 						m.statusMsg = "Sent message to agent..."
 						cmds = append(cmds, m.sendMessageCmd(text))
-						for i := range m.conversations {
-							if m.conversations[i].CascadeID == m.activeCascadeID && m.conversations[i].Title == "New Conversation" {
-								firstLine := strings.Split(text, "\n")[0]
-								if len(firstLine) > 35 {
-									firstLine = firstLine[:32] + "..."
-								}
-								m.conversations[i].Title = firstLine
-								m.rebuildTree()
-								break
-							}
+
+						firstLine := strings.Split(text, "\n")[0]
+						firstLine = strings.TrimSpace(firstLine)
+						if len(firstLine) > 35 {
+							firstLine = firstLine[:32] + "..."
 						}
+						if firstLine != "" {
+							for i := range m.conversations {
+								if m.conversations[i].CascadeID == m.activeCascadeID {
+									if m.conversations[i].Title == "New Conversation" || m.conversations[i].Title == m.activeCascadeID || len(m.conversations[i].Title) == 36 {
+										m.conversations[i].Title = firstLine
+									}
+									break
+								}
+							}
+							if conv, ok := m.createdConversations[m.activeCascadeID]; ok {
+								conv.Title = firstLine
+								m.createdConversations[m.activeCascadeID] = conv
+							}
+							m.rebuildTree()
+						}
+
 						if m.activeCascadeID != "" {
 							cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
 						}
@@ -705,6 +769,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case FocusChat:
 			switch msg.String() {
+			case "r":
+				m.statusMsg = "Refreshing conversations..."
+				cmds = append(cmds, m.loadConversationsCmd())
+				if m.activeCascadeID != "" {
+					cmds = append(cmds, m.loadStepsCmd(m.activeCascadeID))
+				}
+				return m, tea.Batch(cmds...)
 			case "up", "k":
 				m.viewport.LineUp(1)
 				return m, nil

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -350,7 +351,16 @@ func (c *Client) ListAllConversations(ctx context.Context) ([]ConversationItem, 
 	for _, r := range searchResults {
 		title := r.Title
 		if title == "" {
-			title = r.CascadeID
+			if r.Snippet != "" {
+				snippetTitle := strings.TrimSpace(strings.Split(r.Snippet, "\n")[0])
+				if len(snippetTitle) > 35 {
+					snippetTitle = snippetTitle[:32] + "..."
+				}
+				title = snippetTitle
+			}
+			if title == "" {
+				title = r.CascadeID
+			}
 		}
 		itemMap[r.CascadeID] = &ConversationItem{
 			CascadeID:        r.CascadeID,

@@ -167,4 +167,55 @@ func TestActionsKeyboardAndMouse(t *testing.T) {
 	if !ok || stepsMsg.steps != nil {
 		t.Fatalf("Expected stepsLoadedMsg with nil steps, got %T (%v)", msg, msg)
 	}
+
+	// 8. Test typing 'r' into FocusInput puts 'r' into the input box instead of refreshing
+	m.focusedPane = FocusInput
+	m.input.Focus()
+	m.input.Reset()
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = updated.(Model)
+	if m.input.Value() != "r" {
+		t.Fatalf("Expected input box to contain 'r', got '%s'", m.input.Value())
+	}
+	if strings.Contains(m.statusMsg, "Refreshing") {
+		t.Fatalf("Typing 'r' in input box triggered a refresh: %s", m.statusMsg)
+	}
+
+	// 9. Test conversation title is updated with message context upon send
+	for _, ch := range "eactor core temperature monitor" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = updated.(Model)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	foundTitle := false
+	for _, c := range m.conversations {
+		if c.CascadeID == m.activeCascadeID {
+			if strings.Contains(c.Title, "reactor core") {
+				foundTitle = true
+				break
+			}
+		}
+	}
+	if !foundTitle {
+		t.Fatalf("Expected active conversation title to be updated with message context")
+	}
+
+	// 10. Test stepsLoadedMsg derives title for conversation if it has UUID/empty title
+	m.conversations[0].Title = m.conversations[0].CascadeID
+	updated, _ = m.Update(stepsLoadedMsg{
+		cascadeID: m.conversations[0].CascadeID,
+		steps: []hub.Step{
+			{
+				Type: "CORTEX_STEP_TYPE_USER_INPUT",
+				UserInput: &hub.UserInput{
+					UserResponse: "Optimize database indexes for query performance",
+				},
+			},
+		},
+	})
+	m = updated.(Model)
+	if !strings.Contains(m.conversations[0].Title, "Optimize database") {
+		t.Fatalf("Expected stepsLoadedMsg to derive title from user input, got '%s'", m.conversations[0].Title)
+	}
 }
