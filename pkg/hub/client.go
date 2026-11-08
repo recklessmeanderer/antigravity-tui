@@ -310,6 +310,7 @@ type ConversationItem struct {
 	StepCount        int
 	Status           string
 	LastModifiedTime string
+	Pinned           bool
 }
 
 // SearchConversations queries the conversation index across all workspaces.
@@ -401,6 +402,7 @@ func (c *Client) ListAllConversations(ctx context.Context) ([]ConversationItem, 
 	// Map project IDs to human-readable project names (e.g. 4662a52d... -> "investments")
 	projectMap := LoadProjectMap()
 	convProjectMap := LoadConversationProjectIDs()
+	_, pinnedMap := LoadPinnedConversations()
 
 	var list []ConversationItem
 	for _, it := range itemMap {
@@ -408,6 +410,9 @@ func (c *Client) ListAllConversations(ctx context.Context) ([]ConversationItem, 
 			if pname, exists := projectMap[pid]; exists && pname != "" {
 				it.WorkspaceName = pname
 			}
+		}
+		if pinnedMap[it.CascadeID] {
+			it.Pinned = true
 		}
 		list = append(list, *it)
 	}

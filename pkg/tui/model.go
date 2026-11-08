@@ -688,7 +688,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "n":
 				cmd := m.createNewConversation("")
 				return m, cmd
-			case "p":
+			case "p", "P":
+				if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+					node := m.visibleNodes[m.selectedNodeIdx]
+					if !node.IsHeader && node.Conversation != nil {
+						cmd := m.toggleSelectedPin()
+						return m, cmd
+					}
+				}
 				m.startNewProjectPrompt()
 				return m, nil
 			case "r":
@@ -853,6 +860,9 @@ func (m *Model) createNewConversation(projectName string) tea.Cmd {
 		projectName = "General"
 		if len(m.visibleNodes) > 0 && m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
 			projectName = m.visibleNodes[m.selectedNodeIdx].ProjectName
+			if projectName == "PINNED" {
+				projectName = "General"
+			}
 		} else if m.activeCascadeID != "" {
 			for _, c := range m.conversations {
 				if c.CascadeID == m.activeCascadeID && c.WorkspaceName != "" {
@@ -964,7 +974,7 @@ func (m *Model) startDeleteProjPrompt() {
 		}
 	}
 
-	if targetProj == "" {
+	if targetProj == "" || targetProj == "PINNED" {
 		m.statusMsg = "No project selected to delete."
 		return
 	}
@@ -1101,6 +1111,8 @@ func (m *Model) triggerAction(actionID string) tea.Cmd {
 				m.input.Focus()
 			}
 		}
+	case "pin_chat":
+		return m.toggleSelectedPin()
 	case "new_chat":
 		cmd := m.createNewConversation("")
 		return cmd
@@ -1123,4 +1135,32 @@ func (m *Model) triggerAction(actionID string) tea.Cmd {
 		return tea.Quit
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *Model) toggleSelectedPin() tea.Cmd {
+	if m.selectedNodeIdx >= 0 && m.selectedNodeIdx < len(m.visibleNodes) {
+		node := m.visibleNodes[m.selectedNodeIdx]
+		if !node.IsHeader && node.Conversation != nil {
+			cid := node.Conversation.CascadeID
+			newPinned, err := hub.TogglePinConversation(cid)
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Failed to pin/unpin: %v", err)
+				return nil
+			}
+			if newPinned {
+				m.statusMsg = fmt.Sprintf("📌 Pinned '%s'", node.Conversation.Title)
+			} else {
+				m.statusMsg = fmt.Sprintf("Unpinned '%s'", node.Conversation.Title)
+			}
+			for i := range m.conversations {
+				if m.conversations[i].CascadeID == cid {
+					m.conversations[i].Pinned = newPinned
+				}
+			}
+			m.rebuildTree()
+			return nil
+		}
+	}
+	m.statusMsg = "Select a conversation to pin/unpin."
+	return nil
 }

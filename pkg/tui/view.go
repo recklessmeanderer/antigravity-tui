@@ -201,6 +201,7 @@ func (m Model) renderButtonBar() (string, []ButtonHitbox) {
 	addBtn("open", "␣ Open", btnStyle)
 
 	// Responsive labels for compact widths
+	pinLabel := "📌 Pin (p)"
 	chatLabel := "+ Chat (Ctrl+N)"
 	delChatLabel := "🗑 Del Chat (Ctrl+D)"
 	projLabel := "+ Proj (Ctrl+P)"
@@ -208,33 +209,40 @@ func (m Model) renderButtonBar() (string, []ButtonHitbox) {
 	refreshLabel := "⟳ Refresh"
 	quitLabel := "✕ Quit (Ctrl+C)"
 
-	if m.width > 0 && m.width < 135 {
+	if m.width > 0 && m.width < 145 {
+		pinLabel = "📌 Pin"
 		chatLabel = "+ Chat"
 		delChatLabel = "🗑 Del Chat"
 		projLabel = "+ Proj"
 		delProjLabel = "🗑 Del Proj"
 		quitLabel = "✕ Quit"
-		if m.width < 95 {
+		if m.width < 105 {
+			pinLabel = "📌"
 			refreshLabel = "⟳"
+			delChatLabel = "🗑 Chat"
+			delProjLabel = "🗑 Proj"
 		}
 	}
 
-	// 3. New Chat Button
+	// 3. Pin / Unpin Button
+	addBtn("pin_chat", pinLabel, btnStyle)
+
+	// 4. New Chat Button
 	addBtn("new_chat", chatLabel, btnStyle)
 
-	// 4. Delete Chat Button
+	// 5. Delete Chat Button
 	addBtn("del_chat", delChatLabel, btnDangerStyle)
 
-	// 5. New Project Button
+	// 6. New Project Button
 	addBtn("new_proj", projLabel, btnStyle)
 
-	// 6. Delete Project Button
+	// 7. Delete Project Button
 	addBtn("del_proj", delProjLabel, btnDangerStyle)
 
-	// 7. Refresh Button
+	// 8. Refresh Button
 	addBtn("refresh", refreshLabel, btnStyle)
 
-	// 8. Quit Button
+	// 9. Quit Button
 	addBtn("quit", quitLabel, btnQuitStyle)
 
 	buttonBar := strings.Join(renderedBtns, " ")
@@ -243,7 +251,14 @@ func (m Model) renderButtonBar() (string, []ButtonHitbox) {
 
 func (m Model) renderSidebar(width int) string {
 	var b strings.Builder
-	header := fmt.Sprintf("PROJECTS (%d)", len(m.projectGroups))
+	projCount := len(m.projectGroups)
+	for _, g := range m.projectGroups {
+		if g.Name == "PINNED" {
+			projCount--
+			break
+		}
+	}
+	header := fmt.Sprintf("PROJECTS (%d)", projCount)
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(primaryColor).Render(header))
 	b.WriteString("\n")
 
@@ -280,11 +295,20 @@ func (m Model) renderSidebar(width int) string {
 
 		if node.IsHeader {
 			isExpanded := m.expandedState[node.ProjectName]
+			if node.ProjectName == "PINNED" {
+				if _, ok := m.expandedState["PINNED"]; !ok {
+					isExpanded = true
+				}
+			}
 			icon := "▶"
 			if isExpanded {
 				icon = "▼"
 			}
-			label := fmt.Sprintf("%s %s (%d)", icon, node.ProjectName, node.Count)
+			displayName := node.ProjectName
+			if node.ProjectName == "PINNED" {
+				displayName = "📌 PINNED"
+			}
+			label := fmt.Sprintf("%s %s (%d)", icon, displayName, node.Count)
 
 			maxLen := width - 4
 			if len(label) > maxLen {
@@ -309,7 +333,12 @@ func (m Model) renderSidebar(width int) string {
 				statusPill = "▶"
 			}
 
-			line := fmt.Sprintf("  %s %s", statusPill, name)
+			pinBadge := ""
+			if conv.Pinned {
+				pinBadge = "📌 "
+			}
+
+			line := fmt.Sprintf("  %s%s %s", pinBadge, statusPill, name)
 			maxLen := width - 4
 			if len(line) > maxLen {
 				line = line[:maxLen-3] + "..."

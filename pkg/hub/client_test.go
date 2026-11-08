@@ -33,7 +33,7 @@ func TestLiveHubConnection(t *testing.T) {
 	t.Logf("Live hub connected successfully! Found %d total conversations across workspaces.", len(conversations))
 	for i, c := range conversations {
 		if i < 5 {
-			t.Logf(" - [%d] ID: %s | Title: %s | Status: %s", i, c.CascadeID, c.Title, c.Status)
+			t.Logf(" - [%d] ID: %s | Title: %s | Status: %s | Pinned: %v", i, c.CascadeID, c.Title, c.Status, c.Pinned)
 		}
 	}
 }
