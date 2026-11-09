@@ -10,8 +10,9 @@ Designed to run in a terminal on another desktop / workspace in **Hyprland** (or
 
 ## ✨ Features
 
-- **Zero-Config Auto-Discovery**: Automatically discovers running Antigravity instances via `~/.gemini/antigravity/daemon/hub_*.json`, reading the HTTP port and CSRF token.
+- **Zero-Config Dynamic Auto-Discovery**: Automatically discovers running Antigravity instances across reboots and restarts by scanning `/proc` for live `language_server` processes, dynamically resolving ephemeral HTTP ports from logs and socket inodes, and pruning stale daemon records.
 - **WebSocket RPC Protocol**: Speaks the native Connect/gRPC JSON-framed WebSocket protocol directly to `/connect-websocket`.
+- **CLI Hub Credentials Export**: Run `antigravity-tui -json` to export active hub connection details (PID, port, and CSRF token) as JSON for shell scripts, external tools, or custom agents.
 - **Project Tree View (Starts Collapsed)**:
   - Conversations are organized by project/workspace (`antigravity-tui`, `oscillopulse`, etc.).
   - Projects start **collapsed** by default (`▶ ProjectName (count)`), saving vertical space on compact screens.
@@ -42,7 +43,11 @@ go build -o bin/antigravity-tui ./cmd/antigravity-tui
 
 ### Run
 ```bash
+# Launch interactive TUI
 antigravity-tui
+
+# Or export active hub credentials as JSON
+antigravity-tui -json
 ```
 
 ---
