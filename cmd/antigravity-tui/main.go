@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ func main() {
 		configPath = flag.String("config", "", "Path to Antigravity hub JSON file (default auto-discovers in ~/.gemini/antigravity/daemon)")
 		portFlag   = flag.Int("port", 0, "Override Antigravity HTTP port")
 		tokenFlag  = flag.String("token", "", "Override Antigravity CSRF token")
+		jsonFlag   = flag.Bool("json", false, "Print discovered hub configuration as JSON and exit")
 	)
 	flag.Parse()
 
@@ -35,6 +37,16 @@ func main() {
 	}
 	if *tokenFlag != "" {
 		hubInfo.CsrfToken = *tokenFlag
+	}
+
+	if *jsonFlag {
+		data, err := json.MarshalIndent(hubInfo, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error marshaling hub info: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(data))
+		return
 	}
 
 	// 2. Connect to Antigravity WebSocket RPC
